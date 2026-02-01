@@ -13,6 +13,26 @@ export interface RunEnvelope {
   designDocMarkdown: string | null
 }
 
+export interface ArtifactPathsDto {
+  state: string
+  input: string
+  clarifier: string
+  clarifiedSpec: string
+  publishedPackage: string
+  designDoc: string
+}
+
+export interface RunMetadata {
+  runId: string
+  status: string
+  createdAt: string
+  updatedAt: string
+  hasDesignDoc: boolean
+  artifactPaths: ArtifactPathsDto
+  blockingQuestions?: QuestionDto[] | null
+  nonBlockingQuestions?: QuestionDto[] | null
+}
+
 export interface CreateRunRequest {
   title: string
   prompt: string

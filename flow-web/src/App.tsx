@@ -1,92 +1,58 @@
-import { useState, useEffect, useCallback } from 'react'
-import type { RunEnvelope } from './types'
-import StartRun from './StartRun'
-import Clarifications from './Clarifications'
-import Results from './Results'
+import { BrowserRouter, Routes, Route, Link } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/sonner"
+import { RecentRuns } from "@/components/RecentRuns"
+import { ComposePage } from "@/pages/ComposePage"
+import { RunPage } from "@/pages/RunPage"
 
-function getRunIdFromUrl(): string | null {
-  const params = new URLSearchParams(window.location.search)
-  return params.get('runId')
-}
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 30_000,
+    },
+  },
+})
 
-function setRunIdInUrl(runId: string | null) {
-  const url = new URL(window.location.href)
-  if (runId) {
-    url.searchParams.set('runId', runId)
-  } else {
-    url.searchParams.delete('runId')
-  }
-  window.history.replaceState({}, '', url.toString())
+function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="border-b">
+        <div className="container mx-auto flex items-center gap-6 px-4 py-3">
+          <Link
+            to="/"
+            className="text-lg font-semibold hover:text-primary"
+          >
+            Flow
+          </Link>
+          <nav className="flex items-center gap-4">
+            <Link
+              to="/"
+              className="text-sm text-muted-foreground hover:text-foreground"
+            >
+              New Design
+            </Link>
+            <RecentRuns />
+          </nav>
+        </div>
+      </header>
+      <main className="container mx-auto px-4 py-6">{children}</main>
+    </div>
+  )
 }
 
 export default function App() {
-  const [runId, setRunIdState] = useState<string | null>(() => getRunIdFromUrl())
-  const [run, setRun] = useState<RunEnvelope | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const setRunId = useCallback((id: string | null) => {
-    setRunIdState(id)
-    setRunIdInUrl(id)
-    if (!id) setRun(null)
-  }, [])
-
-  useEffect(() => {
-    if (!runId) return
-    setLoading(true)
-    setError(null)
-    fetch(`/api/design/runs/${runId}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(res.status === 404 ? 'Run not found' : `Error ${res.status}`)
-        return res.json()
-      })
-      .then((meta) => {
-        const statePath = meta.artifactPaths?.state ?? ''
-        const runPath = statePath ? statePath.replace(/[/\\]state\.json$/i, '') : ''
-        setRun({
-          runId: meta.runId,
-          status: meta.status,
-          runPath,
-          blockingQuestions: meta.blockingQuestions ?? [],
-          nonBlockingQuestions: meta.nonBlockingQuestions ?? [],
-          designDocMarkdown: null,
-        })
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [runId])
-
-  if (runId && run?.status === 'AwaitingClarifications') {
-    return (
-      <Clarifications
-        runId={runId}
-        run={run}
-        onSuccess={(updated) => setRun(updated)}
-        onStartNew={() => setRunId(null)}
-      />
-    )
-  }
-
-  if (runId && run?.status === 'Completed') {
-    return (
-      <Results
-        runId={runId}
-        runPath={run.runPath}
-        onStartNew={() => setRunId(null)}
-        initialMarkdown={run.designDocMarkdown}
-      />
-    )
-  }
-
   return (
-    <StartRun
-      onSuccess={(envelope) => {
-        setRun(envelope)
-        setRunId(envelope.runId)
-      }}
-      loading={loading}
-      error={error}
-      existingRunId={runId}
-    />
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<ComposePage />} />
+            <Route path="/runs/:runId" element={<RunPage />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
+      <Toaster position="top-right" richColors />
+    </QueryClientProvider>
   )
 }

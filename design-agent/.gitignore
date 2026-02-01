@@ -1,0 +1,25 @@
+# .NET build
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+
+# User/IDE
+*.user
+*.userosscache
+*.suo
+.vs/
+.idea/
+
+# NuGet
+packages/
+!packages/build/
+project.lock.json
+project.fragment.lock.json
+
+# Other
+*.nupkg
+*.snupkg
+artifacts/
