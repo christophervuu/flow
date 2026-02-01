@@ -1,27 +1,32 @@
 using System.CommandLine;
+using System.Text.Json;
 
 namespace design_agent.Commands;
 
 public static class ShowCommand
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+
     public static Command Create()
     {
         var runIdOption = new Option<string>("--run-id", "Run ID (GUID)") { IsRequired = true };
         var runDirOption = new Option<string>("--run-dir", () => ".", "Base directory for runs (default: current directory)");
+        var jsonOption = new Option<bool>("--json", "Output a single JSON envelope (runId, status, runPath, designDocMarkdown)");
 
         var command = new Command("show", "Show the last published design doc");
         command.AddOption(runIdOption);
         command.AddOption(runDirOption);
+        command.AddOption(jsonOption);
 
-        command.SetHandler((runId, runDir) =>
+        command.SetHandler((runId, runDir, json) =>
         {
-            Execute(runId!, runDir ?? ".");
-        }, runIdOption, runDirOption);
+            Execute(runId!, runDir ?? ".", json);
+        }, runIdOption, runDirOption, jsonOption);
 
         return command;
     }
 
-    private static void Execute(string runId, string runDir)
+    private static void Execute(string runId, string runDir, bool json)
     {
         var runPath = design_agent.Services.RunPersistence.GetRunDir(runDir, runId);
 
@@ -34,11 +39,28 @@ public static class ShowCommand
         var designPath = design_agent.Services.RunPersistence.GetDesignMarkdownPath(runPath);
         if (designPath == null)
         {
-            Console.WriteLine("Run not finished; no design doc available.");
+            if (json)
+            {
+                var state = design_agent.Services.RunPersistence.LoadState(runPath);
+                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = (string?)null };
+                Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
+            }
+            else
+            {
+                Console.WriteLine("Run not finished; no design doc available.");
+            }
             return;
         }
 
         var markdown = design_agent.Services.RunPersistence.LoadDesignMarkdown(runPath);
-        Console.WriteLine(markdown);
+        if (json)
+        {
+            var envelope = new { runId, status = "Completed", runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = markdown };
+            Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
+        }
+        else
+        {
+            Console.WriteLine(markdown);
+        }
     }
 }

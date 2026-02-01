@@ -1,27 +1,32 @@
 using System.CommandLine;
+using System.Text.Json;
 
 namespace design_agent.Commands;
 
 public static class AnswerCommand
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+
     public static Command Create()
     {
         var runIdOption = new Option<string>("--run-id", "Run ID (GUID)") { IsRequired = true };
         var runDirOption = new Option<string>("--run-dir", () => ".", "Base directory for runs (default: current directory)");
+        var jsonOption = new Option<bool>("--json", "Output a single JSON envelope (runId, status, questions, designDocMarkdown)");
 
         var command = new Command("answer", "Answer blocking questions and resume pipeline");
         command.AddOption(runIdOption);
         command.AddOption(runDirOption);
+        command.AddOption(jsonOption);
 
-        command.SetHandler(async (runId, runDir) =>
+        command.SetHandler(async (runId, runDir, json) =>
         {
-            await ExecuteAsync(runId!, runDir ?? ".");
-        }, runIdOption, runDirOption);
+            await ExecuteAsync(runId!, runDir ?? ".", json);
+        }, runIdOption, runDirOption, jsonOption);
 
         return command;
     }
 
-    private static async Task ExecuteAsync(string runId, string runDir)
+    private static async Task ExecuteAsync(string runId, string runDir, bool json)
     {
         design_agent.Services.RunPersistence.ValidateGitHubToken();
 
@@ -61,7 +66,7 @@ public static class AnswerCommand
         }
 
         var draft = clarifierOutput.ClarifiedSpecDraft;
-        var clarifiedSpec = CreateClarifiedSpecFromDraft(draft!, answers);
+        var clarifiedSpec = design_agent.Services.ClarifiedSpecHelper.CreateFromDraft(draft!, answers);
         design_agent.Services.RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
 
         var (_, _, _, published) = await design_agent.Services.PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, answers);
@@ -69,27 +74,14 @@ public static class AnswerCommand
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         design_agent.Services.RunPersistence.SaveState(runPath, state);
 
+        if (json)
+        {
+            var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = published.DesignDocMarkdown };
+            Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
+            return;
+        }
         Console.WriteLine(published.DesignDocMarkdown ?? "");
         Console.WriteLine();
         Console.WriteLine($"--- Run ID: {runId} | Design doc: {runPath}/published/DESIGN.md ---");
-    }
-
-    private static design_agent.Models.ClarifiedSpec CreateClarifiedSpecFromDraft(
-        design_agent.Models.ClarifiedSpecDraft draft,
-        IReadOnlyDictionary<string, string> answers)
-    {
-        var openQuestions = (draft.OpenQuestions ?? [])
-            .Where(q => !q.Blocking || answers.ContainsKey(q.Id))
-            .ToList();
-        return new design_agent.Models.ClarifiedSpec(
-            draft.Title ?? "",
-            draft.ProblemStatement ?? "",
-            draft.Goals ?? [],
-            draft.NonGoals ?? [],
-            draft.Assumptions ?? [],
-            draft.Constraints ?? [],
-            draft.Requirements ?? new design_agent.Models.RequirementsSpec([], []),
-            draft.SuccessMetrics ?? [],
-            openQuestions);
     }
 }

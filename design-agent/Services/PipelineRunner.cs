@@ -117,8 +117,8 @@ public static class PipelineRunner
             if (result == null)
             {
                 RunPersistence.SaveRawAgentOutput(runPath, agentName, retryText);
-                Console.Error.WriteLine($"Error: {agentName} produced invalid JSON after retry. Raw output saved to artifacts/{agentName}.raw.txt");
-                Environment.Exit(1);
+                throw new InvalidOperationException(
+                    $"{agentName} produced invalid JSON after retry. Raw output saved to artifacts/{agentName}.raw.txt");
             }
 
             return result!;
@@ -128,7 +128,6 @@ public static class PipelineRunner
             Console.Error.WriteLine($"Error: Model call failed. Status: {ex.Status}, Message: {ex.Message}");
             if (!string.IsNullOrEmpty(ex.ErrorCode))
                 Console.Error.WriteLine($"Error code: {ex.ErrorCode}");
-            Environment.Exit(1);
             throw;
         }
     }

@@ -5,12 +5,31 @@ namespace design_agent.Services;
 
 public static class RunPersistence
 {
+    /// <summary>
+    /// Validates GITHUB_TOKEN and exits the process with code 1 if missing (for CLI use).
+    /// </summary>
     public static void ValidateGitHubToken()
+    {
+        try
+        {
+            ValidateGitHubTokenOrThrow();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            Environment.Exit(1);
+        }
+    }
+
+    /// <summary>
+    /// Validates GITHUB_TOKEN and throws if missing (for API use; avoids Environment.Exit).
+    /// </summary>
+    public static void ValidateGitHubTokenOrThrow()
     {
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GITHUB_TOKEN")))
         {
-            Console.Error.WriteLine("Error: GITHUB_TOKEN environment variable is required. Set it with a PAT that has GitHub Models (models: read) access.");
-            Environment.Exit(1);
+            throw new InvalidOperationException(
+                "GITHUB_TOKEN environment variable is required. Set it with a PAT that has GitHub Models (models: read) access.");
         }
     }
 
