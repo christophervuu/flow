@@ -64,7 +64,7 @@ export function ResultsPage({
       {content && (
         <div
           className={cn(
-            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-6 mb-6 max-h-[70vh] overflow-auto shadow-[var(--shadow-card)]"
+            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-6 mb-6 max-h-[70vh] overflow-auto shadow-[var(--shadow-card)] retro-card-outline"
           )}
         >
           <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">

@@ -152,6 +152,11 @@ button:not(:disabled),
   background: #c4b5f0;
 }
 
+/* Retro theme: card/panel outlines need solid border-style to render */
+[data-theme="retro"] .retro-card-outline {
+  border-style: solid;
+}
+
 /* Retro theme: black outlines on all form components */
 [data-theme="retro"] input,
 [data-theme="retro"] textarea,
@@ -160,8 +165,26 @@ button:not(:disabled),
   border-color: var(--border) !important;
 }
 
-[data-theme="retro"] button {
+/* Exclude accordion triggers and inline text buttons from thick border */
+[data-theme="retro"] button:not([data-radix-collection-item]):not(.no-retro-border) {
   border-width: var(--border-width) !important;
   border-style: solid !important;
   border-color: var(--border) !important;
+}
+
+/* Ensure accordion triggers and inline buttons don't get thick borders */
+[data-theme="retro"] [data-radix-collection-item],
+[data-theme="retro"] .no-retro-border {
+  border-width: 0 !important;
+  border-style: none !important;
+}
+
+/* Retro theme: make prose/markdown text black for readability */
+[data-theme="retro"] .prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--foreground);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--foreground);
+  --tw-prose-bullets: var(--foreground);
 }

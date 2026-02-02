@@ -28,7 +28,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-background">
       <header
         className={cn(
-          "border-b-[var(--border-width)] border-[var(--border)] bg-[var(--card)]"
+          "border-b-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline"
         )}
       >
         <div className="container mx-auto flex items-center gap-6 px-4 py-3">

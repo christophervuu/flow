@@ -37,7 +37,7 @@ export function RecentRuns() {
                 <button
                   type="button"
                   onClick={() => handleSelectRun(run.runId)}
-                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  className="no-retro-border flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                 >
                   <span className="truncate">{run.title || "Untitled"}</span>
                   <span className="text-muted-foreground text-xs shrink-0">

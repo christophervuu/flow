@@ -73,7 +73,7 @@ export function RunPage() {
       >
         <div
           className={cn(
-            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline"
           )}
         >
           <div className="flex items-center gap-3 mb-6">
@@ -97,11 +97,11 @@ export function RunPage() {
 
         <div
           className={cn(
-            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline"
           )}
         >
           <ExecutionDAG runId={runId} status={status} />
-          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6">
+          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
             <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
               <div
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"

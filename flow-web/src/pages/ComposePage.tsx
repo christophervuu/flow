@@ -26,14 +26,34 @@ export function ComposePage() {
   const [title, setTitle] = useState("")
   const [prompt, setPrompt] = useState("")
   const [context, setContext] = useState<StructuredContext>(emptyContext)
-  const [submitting, setSubmitting] = useState(false)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [initialDesignMarkdown, setInitialDesignMarkdown] = useState<string | null>(null)
+  const [submittedPrompt, setSubmittedPrompt] = useState("")
+  const [submittedTitle, setSubmittedTitle] = useState("")
+
+  // Non-blocking run creation mutation
+  const createRunMutation = useMutation({
+    mutationFn: (params: { title: string; prompt: string; context?: { links?: string[]; notes?: string } }) =>
+      createRun(params),
+    onSuccess: (envelope) => {
+      addRecentRun(envelope.runId, submittedTitle)
+      setRunId(envelope.runId)
+      if (envelope.designDocMarkdown) {
+        setInitialDesignMarkdown(envelope.designDocMarkdown)
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to start run")
+      setRunId(null) // Go back to form
+    },
+  })
+
+  const isPending = runId === "pending"
 
   const { data: meta, isLoading, error, refetch } = useQuery({
     queryKey: ["run", runId],
     queryFn: () => getRun(runId!),
-    enabled: !!runId,
+    enabled: !!runId && runId !== "pending",
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === "Running" || status === "AwaitingClarifications"
@@ -72,38 +92,33 @@ export function ComposePage() {
     }
   }, [meta?.status, meta?.blockingQuestions, meta?.nonBlockingQuestions])
 
-  async function handleSubmit(e: FormEvent) {
+  function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!title.trim() || !prompt.trim()) {
       toast.error("Title and prompt are required")
       return
     }
-    setSubmitting(true)
-    try {
-      const finalPrompt = buildPrompt(prompt, context)
-      const linksText = context.links?.trim() ?? ""
-      const links = linksText
-        ? linksText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-        : undefined
-      const notes = context.notes?.trim() || undefined
 
-      const envelope = await createRun({
-        title: title.trim(),
-        prompt: finalPrompt,
-        ...(links?.length || notes ? { context: { links, notes } } : {}),
-      })
+    const finalPrompt = buildPrompt(prompt, context)
+    const linksText = context.links?.trim() ?? ""
+    const links = linksText
+      ? linksText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+      : undefined
+    const notes = context.notes?.trim() || undefined
 
-      addRecentRun(envelope.runId, title.trim())
-      toast.success("Run started")
-      setRunId(envelope.runId)
-      if (envelope.designDocMarkdown) {
-        setInitialDesignMarkdown(envelope.designDocMarkdown)
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to start run")
-    } finally {
-      setSubmitting(false)
-    }
+    // Store submitted values for display in left column
+    setSubmittedTitle(title.trim())
+    setSubmittedPrompt(prompt.trim())
+
+    // Transition immediately to two-column view
+    setRunId("pending")
+
+    // Fire API request in background
+    createRunMutation.mutate({
+      title: title.trim(),
+      prompt: finalPrompt,
+      ...(links?.length || notes ? { context: { links, notes } } : {}),
+    })
   }
 
   function handleStartNewRun() {
@@ -136,7 +151,7 @@ export function ComposePage() {
       <div className="max-w-2xl mx-auto">
         <div
           className={cn(
-            "relative p-8 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)]",
+            "relative p-8 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline",
             "shadow-[var(--shadow-card)]"
           )}
         >
@@ -181,7 +196,7 @@ export function ComposePage() {
                   theme === "retro" ? "Give your design a name..." : "Design title"
                 }
                 required
-                disabled={submitting}
+                disabled={createRunMutation.isPending}
                 className="mt-1 bg-[var(--background)]"
               />
             </div>
@@ -200,7 +215,7 @@ export function ComposePage() {
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe what you want to design..."
                 required
-                disabled={submitting}
+                disabled={createRunMutation.isPending}
                 rows={5}
                 className="mt-1 bg-[var(--background)]"
               />
@@ -210,23 +225,19 @@ export function ComposePage() {
               <ContextAccordion
                 context={context}
                 onChange={setContext}
-                disabled={submitting}
+                disabled={createRunMutation.isPending}
               />
             </div>
 
             <Button
               type="submit"
-              disabled={submitting}
+              disabled={createRunMutation.isPending}
               className={cn(
                 theme === "retro" &&
                   "bg-[var(--accent-yellow)] text-[var(--foreground)] hover:bg-[#ffef9f] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[var(--shadow-button-hover)]"
               )}
             >
-              {submitting
-                ? "Starting…"
-                : theme === "retro"
-                  ? "▶ Start run"
-                  : "Start run"}
+              {theme === "retro" ? "▶ Start run" : "Start run"}
             </Button>
           </form>
         </div>
@@ -234,7 +245,9 @@ export function ComposePage() {
     )
   }
 
-  if (isLoading) {
+  // Don't show the old loading spinner - we now show inline loading in the DAG
+  // Only show loading if we have a real runId (not pending) and are still loading
+  if (isLoading && !isPending) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
         <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
@@ -259,7 +272,8 @@ export function ComposePage() {
     )
   }
 
-  if (!meta) return null
+  // If we're pending or have meta, show the two-column layout
+  if (!meta && !isPending) return null
 
   return (
     <div
@@ -272,7 +286,7 @@ export function ComposePage() {
       {/* Left column: form summary */}
       <div
         className={cn(
-          "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+          "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline"
         )}
       >
         <div className="flex items-center justify-between mb-6">
@@ -290,6 +304,7 @@ export function ComposePage() {
           <Button
             variant="outline"
             onClick={handleStartNewRun}
+            disabled={isPending}
             className={cn(
               theme === "retro" &&
                 "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
@@ -298,41 +313,46 @@ export function ComposePage() {
             Start new run
           </Button>
         </div>
-        <p className="font-semibold text-[var(--foreground)] mb-1">{title}</p>
-        <p className="text-sm text-[var(--muted-foreground)] whitespace-pre-wrap line-clamp-6 mb-4">
-          {prompt}
+        <p className="font-semibold text-[var(--foreground)] mb-1">
+          {isPending ? submittedTitle : title}
         </p>
-        <p className="font-mono text-xs text-[var(--muted-foreground)]">{runId}</p>
+        <p className="text-sm text-[var(--muted-foreground)] whitespace-pre-wrap line-clamp-6 mb-4">
+          {isPending ? submittedPrompt : prompt}
+        </p>
+        <p className="font-mono text-xs text-[var(--muted-foreground)]">
+          {isPending ? "Creating run…" : runId}
+        </p>
       </div>
 
-      {/* Right column: status-dependent content */}
+      {/* Right column: DAG + status-dependent content */}
       <div
         className={cn(
-          "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+          "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline"
         )}
       >
-        {status === "Running" && (
-          <>
-            <ExecutionDAG runId={runId} status={status} />
-            <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6">
-              <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
-                <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
-                  aria-hidden
-                >
-                  📝
-                </div>
-                <h4 className="font-semibold">Agent Response</h4>
+        {/* Always show ExecutionDAG at the top */}
+        <ExecutionDAG runId={runId!} status={isPending ? "Running" : (status ?? "Running")} />
+
+        {/* Status-dependent content below the DAG */}
+        {(status === "Running" || isPending) && (
+          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
+            <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
+              <div
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
+                aria-hidden
+              >
+                📝
               </div>
-              <p className="italic text-[var(--muted-foreground)]">
-                Waiting for execution to complete…
-              </p>
+              <h4 className="font-semibold">Agent Response</h4>
             </div>
-          </>
+            <p className="italic text-[var(--muted-foreground)]">
+              Waiting for execution to complete…
+            </p>
+          </div>
         )}
 
-        {status === "AwaitingClarifications" && (
-          <>
+        {status === "AwaitingClarifications" && !isPending && (
+          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
             <div className="flex items-center gap-3 mb-6">
               <div
                 className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-blue)] text-xl"
@@ -344,8 +364,8 @@ export function ComposePage() {
             </div>
             <form onSubmit={handleClarificationsSubmit} className="space-y-6">
               <QuestionSection
-                blocking={meta.blockingQuestions ?? []}
-                nonBlocking={meta.nonBlockingQuestions ?? []}
+                blocking={meta?.blockingQuestions ?? []}
+                nonBlocking={meta?.nonBlockingQuestions ?? []}
                 answers={answers}
                 onChange={setAnswers}
                 disabled={submitAnswersMutation.isPending}
@@ -361,11 +381,11 @@ export function ComposePage() {
                 {submitAnswersMutation.isPending ? "Submitting…" : "Submit answers"}
               </Button>
             </form>
-          </>
+          </div>
         )}
 
-        {status === "Completed" && (
-          <div>
+        {status === "Completed" && !isPending && (
+          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
             <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
               {theme === "retro" && (
                 <div
@@ -389,7 +409,7 @@ export function ComposePage() {
           </div>
         )}
 
-        {status && !["Running", "AwaitingClarifications", "Completed"].includes(status) && (
+        {status && !isPending && !["Running", "AwaitingClarifications", "Completed"].includes(status) && (
           <div className="text-center py-8">
             <p className="text-muted-foreground mb-4">Unknown status: {status}</p>
             <Button variant="outline" onClick={() => refetch()}>

@@ -23,7 +23,7 @@ const MOCK_ARTIFACT_PATHS = {
 export function mockRunEnvelope(runId: string = MOCK_RUN_ID): RunEnvelope {
   return {
     runId,
-    status: "Completed",
+    status: "Running", // Start as Running so DAG visualization is shown
     runPath: "/mock/path",
     blockingQuestions: [],
     nonBlockingQuestions: [],
@@ -31,18 +31,35 @@ export function mockRunEnvelope(runId: string = MOCK_RUN_ID): RunEnvelope {
   }
 }
 
+// Track when mock run started for simulating progression
+let mockRunStartTime: number | null = null
+
 export function mockRunMetadata(runId: string = MOCK_RUN_ID): RunMetadata {
   const now = new Date().toISOString()
+  
+  // Initialize start time on first call
+  if (!mockRunStartTime) {
+    mockRunStartTime = Date.now()
+  }
+  
+  // Simulate progression: Running for 25s, then Completed
+  const elapsed = Date.now() - mockRunStartTime
+  const isCompleted = elapsed > 25000
+  
   return {
     runId,
-    status: "Completed",
+    status: isCompleted ? "Completed" : "Running",
     createdAt: now,
     updatedAt: now,
-    hasDesignDoc: true,
+    hasDesignDoc: isCompleted,
     artifactPaths: MOCK_ARTIFACT_PATHS,
     blockingQuestions: null,
     nonBlockingQuestions: null,
   }
+}
+
+export function resetMockRunState() {
+  mockRunStartTime = null
 }
 
 export function mockDesignMarkdown(): string {

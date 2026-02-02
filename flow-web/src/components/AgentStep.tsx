@@ -44,7 +44,7 @@ export function AgentStep({
     <div className="relative">
       <div
         className={cn(
-          "flex items-center gap-4 rounded-[var(--border-radius-card)] border-[2px] border-[var(--border)] p-4 transition-all",
+          "flex items-center gap-4 rounded-[var(--border-radius-card)] border-[2px] border-[var(--border)] p-4 transition-all retro-card-outline",
           status === "pending" && "bg-[#f0f0f0]",
           status === "active" &&
             "bg-[var(--accent-yellow)] step-icon-active shadow-[var(--shadow-button)]",

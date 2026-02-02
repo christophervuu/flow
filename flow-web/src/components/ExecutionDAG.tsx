@@ -9,6 +9,14 @@ interface ExecutionDAGProps {
   status: string
 }
 
+const DEFAULT_AGENTS = [
+  "Clarifier",
+  "Synthesizer",
+  "Challenger",
+  "Optimizer",
+  "Publisher",
+]
+
 function getOrderedSteps(
   completed: string[],
   active: string[],
@@ -35,16 +43,30 @@ function getOrderedSteps(
 export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
   const [hideFlow, setHideFlow] = useState(false)
 
+  const isRunning = status === "Running"
+  const isCompleted = status === "Completed"
+  const isPending = runId === "pending"
+
   const { data: execStatus } = useQuery({
     queryKey: ["execution-status", runId],
     queryFn: () => getExecutionStatus(runId),
-    enabled: !!runId && status === "Running",
-    refetchInterval: status === "Running" ? 1000 : false,
+    enabled: !!runId && runId !== "pending" && isRunning,
+    refetchInterval: isRunning ? 1000 : false,
   })
 
-  const completed = execStatus?.completedAgents ?? []
-  const active = execStatus?.activeAgents ?? []
-  const pending = execStatus?.pendingAgents ?? []
+  // For completed runs, show all agents as completed
+  // For pending runs, show all agents as pending
+  const completed = isCompleted
+    ? DEFAULT_AGENTS
+    : isPending
+      ? []
+      : (execStatus?.completedAgents ?? [])
+  const active = isCompleted || isPending ? [] : (execStatus?.activeAgents ?? [])
+  const pending = isCompleted
+    ? []
+    : isPending
+      ? DEFAULT_AGENTS
+      : (execStatus?.pendingAgents ?? [])
   const steps = getOrderedSteps(completed, active, pending)
 
   return (
@@ -54,18 +76,21 @@ export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
           <div
             className={cn(
               "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-blue)] text-xl",
-              status === "Running" && "step-icon-pulse"
+              isRunning && "step-icon-pulse",
+              isCompleted && "bg-[var(--accent-green)]"
             )}
             aria-hidden
           >
-            ⚡
+            {isCompleted ? "✓" : "⚡"}
           </div>
-          <h3 className="text-lg font-semibold">Execution Flow</h3>
+          <h3 className="text-lg font-semibold">
+            {isCompleted ? "Execution Complete" : "Execution Flow"}
+          </h3>
         </div>
         <button
           type="button"
           onClick={() => setHideFlow((v) => !v)}
-          className="rounded-[var(--border-radius-input)] border-[var(--border-width)] border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-semibold hover:bg-[var(--accent-purple)]"
+          className="retro-card-outline rounded-[var(--border-radius-input)] border-[var(--border-width)] border-[var(--border)] bg-[var(--background)] px-4 py-2 text-sm font-semibold hover:bg-[var(--accent-purple)]"
         >
           {hideFlow ? "Show flow" : "Hide flow"}
         </button>
@@ -74,10 +99,20 @@ export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
       {!hideFlow && (
         <div
           className={cn(
-            "space-y-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--background)] p-6"
+            "space-y-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--background)] p-6 retro-card-outline"
           )}
         >
-          {steps.length > 0 ? (
+          {isPending ? (
+            <div className="flex items-center gap-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--accent-yellow)] p-4 retro-card-outline">
+              <div className="size-8 animate-spin rounded-full border-2 border-[var(--border)] border-t-transparent" />
+              <div>
+                <div className="font-semibold">Starting run…</div>
+                <div className="text-sm text-[var(--muted-foreground)]">
+                  Connecting to agent pipeline…
+                </div>
+              </div>
+            </div>
+          ) : steps.length > 0 ? (
             steps.map((agentName, i) => {
               const stepStatus = active.includes(agentName)
                 ? "active"
@@ -102,7 +137,7 @@ export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
               )
             })
           ) : (
-            <div className="flex items-center gap-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[#f0f0f0] p-4">
+            <div className="flex items-center gap-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[#f0f0f0] p-4 retro-card-outline">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[#f0f0f0] text-xl">
                 🎯
               </div>

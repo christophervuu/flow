@@ -12,7 +12,7 @@ export function ThemeSwitcher() {
         id="theme-select"
         value={theme}
         onChange={(e) => setTheme(e.target.value)}
-        className="rounded-[var(--border-radius-input)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-sm"
+        className="retro-card-outline rounded-[var(--border-radius-input)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] px-2 py-1 text-sm"
       >
         {availableThemes.map((t) => (
           <option key={t.id} value={t.id}>

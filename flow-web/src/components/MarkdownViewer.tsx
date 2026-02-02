@@ -11,7 +11,15 @@ export function MarkdownViewer({ content, className }: MarkdownViewerProps) {
   return (
     <div
       className={cn(
-        "prose prose-slate dark:prose-invert max-w-none prose-headings:font-semibold prose-pre:bg-muted prose-pre:border prose-pre:rounded-lg",
+        "prose max-w-none",
+        "prose-headings:font-semibold prose-headings:text-[var(--foreground)]",
+        "prose-p:text-[var(--foreground)]",
+        "prose-li:text-[var(--foreground)]",
+        "prose-strong:text-[var(--foreground)]",
+        "prose-a:text-[var(--primary)]",
+        "prose-pre:bg-muted prose-pre:border prose-pre:rounded-lg",
+        "prose-code:text-[var(--foreground)]",
+        "dark:prose-invert",
         className
       )}
     >
