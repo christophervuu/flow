@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom"
 import {
   Accordion,
   AccordionContent,
@@ -7,10 +6,20 @@ import {
 } from "@/components/ui/accordion"
 import { HistoryIcon } from "lucide-react"
 import { getRecentRuns } from "@/lib/storage"
+import { useRun } from "@/contexts/RunContext"
+import { useNavigate } from "react-router-dom"
 
 export function RecentRuns() {
   const runs = getRecentRuns()
+  const { setRunId } = useRun()
+  const navigate = useNavigate()
+
   if (runs.length === 0) return null
+
+  function handleSelectRun(runId: string) {
+    setRunId(runId)
+    navigate("/")
+  }
 
   return (
     <Accordion type="single" collapsible>
@@ -25,15 +34,16 @@ export function RecentRuns() {
           <ul className="space-y-1">
             {runs.map((run) => (
               <li key={run.runId}>
-                <Link
-                  to={`/runs/${run.runId}`}
-                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                <button
+                  type="button"
+                  onClick={() => handleSelectRun(run.runId)}
+                  className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                 >
                   <span className="truncate">{run.title || "Untitled"}</span>
                   <span className="text-muted-foreground text-xs shrink-0">
                     {new Date(run.createdAt).toLocaleDateString()}
                   </span>
-                </Link>
+                </button>
               </li>
             ))}
           </ul>

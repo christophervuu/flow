@@ -52,6 +52,107 @@ static (List<Question> Blocking, List<Question> NonBlocking) GetQuestionsFromCla
         questions.Where(q => !q.Blocking).ToList());
 }
 
+static ExecutionStatusDto BuildExecutionStatus(string runDir, string runId, string runPath, RunState state)
+{
+    var completed = new List<string>();
+    var active = new List<string>();
+    var currentStage = "";
+    string? currentAgent = null;
+
+    var tracePath = Path.Combine(RunPersistence.GetArtifactsDir(runPath), "trace.jsonl");
+    if (File.Exists(tracePath))
+    {
+        var inProgress = new Dictionary<string, string>();
+        foreach (var line in File.ReadLines(tracePath))
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            try
+            {
+                var obj = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(line);
+                if (obj == null) continue;
+                var kind = obj.TryGetValue("Kind", out var k) ? k.GetString() : null;
+                var stageName = obj.TryGetValue("StageName", out var s) ? s.GetString() : null;
+                var agentName = obj.TryGetValue("AgentName", out var a) ? a.GetString() : null;
+                if (string.IsNullOrEmpty(agentName)) continue;
+
+                if (kind == "stage_start")
+                {
+                    inProgress[agentName] = stageName ?? "";
+                    currentStage = stageName ?? "";
+                    currentAgent = agentName;
+                }
+                else if (kind == "stage_end")
+                {
+                    if (inProgress.Remove(agentName))
+                        completed.Add(agentName);
+                }
+            }
+            catch { /* skip malformed lines */ }
+        }
+        active = inProgress.Keys.ToList();
+    }
+    else
+    {
+        // Infer from artifacts
+        if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "clarifier.json")))
+            completed.Add("Clarifier");
+        if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "proposedDesign.json")))
+        {
+            completed.Add("Synthesizer");
+            var selectionPath = Path.Combine(RunPersistence.GetArtifactsDir(runPath), "synth", "selection.json");
+            if (File.Exists(selectionPath))
+            {
+                try
+                {
+                    var synthDir = Path.Combine(RunPersistence.GetArtifactsDir(runPath), "synth", "specialists");
+                    if (Directory.Exists(synthDir))
+                    {
+                        foreach (var f in Directory.GetFiles(synthDir, "*.json"))
+                        {
+                            var key = Path.GetFileNameWithoutExtension(f);
+                            if (!string.IsNullOrEmpty(key) && !completed.Contains($"Synth_{key}"))
+                                completed.Add($"Synth_{key}");
+                        }
+                    }
+                    if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "synth", "mergedPartial.json")))
+                        completed.Add("Merger");
+                }
+                catch { }
+            }
+        }
+        if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "critique.json")))
+            completed.Add("Challenger");
+        if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "optimizedDesign.json")))
+            completed.Add("Optimizer");
+        if (File.Exists(Path.Combine(RunPersistence.GetArtifactsDir(runPath), "publishedPackage.json")))
+            completed.Add("Publisher");
+
+        if (state.Status == "Running" && completed.Count > 0)
+        {
+            currentStage = completed[^1].StartsWith("Synth_") ? "Synthesizer" : completed[^1];
+            currentAgent = completed[^1];
+        }
+    }
+
+    var allKnown = new HashSet<string> { "Clarifier", "Synthesizer", "Challenger", "Optimizer", "Publisher", "Merger", "DesignJudge", "CritiqueJudge" };
+    foreach (var a in completed) allKnown.Add(a);
+    foreach (var a in active) allKnown.Add(a);
+    var pending = allKnown.Except(completed).Except(active).OrderBy(x => x).ToList();
+
+    var total = Math.Max(completed.Count + active.Count + pending.Count, 1);
+    var current = completed.Count + (active.Count > 0 ? 1 : 0);
+
+    return new ExecutionStatusDto(
+        runId,
+        state.Status,
+        currentStage,
+        currentAgent,
+        completed,
+        active,
+        pending,
+        new ProgressDto(current, total));
+}
+
 app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequest req) =>
 {
     if (string.IsNullOrWhiteSpace(req?.Title) || string.IsNullOrWhiteSpace(req?.Prompt))
@@ -282,8 +383,80 @@ app.MapGet("/api/design/runs/{runId}", (string runId) =>
         catch { /* optional */ }
     }
 
-    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, blockingQuestions, nonBlockingQuestions, remainingOpenQuestionsCount, assumptionsCount);
+    ExecutionStatusDto? executionStatus = null;
+    if (state.Status == "Running" || state.Status == "Completed")
+    {
+        try
+        {
+            executionStatus = BuildExecutionStatus(runDir, runId, runPath, state);
+        }
+        catch { /* optional */ }
+    }
+
+    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, blockingQuestions, nonBlockingQuestions, remainingOpenQuestionsCount, assumptionsCount, executionStatus);
     return Results.Json(meta);
+});
+
+app.MapGet("/api/design/runs/{runId}/status", (string runId) =>
+{
+    var runDir = GetRunDir();
+    var runPath = RunPersistence.GetRunDir(runDir, runId);
+    if (!Directory.Exists(runPath))
+        return Results.Problem("Run not found", statusCode: 404);
+
+    RunState state;
+    try
+    {
+        state = RunPersistence.LoadState(runPath);
+    }
+    catch (InvalidOperationException)
+    {
+        return Results.Problem("Run state invalid", statusCode: 404);
+    }
+
+    try
+    {
+        var status = BuildExecutionStatus(runDir, runId, runPath, state);
+        return Results.Json(status);
+    }
+    catch
+    {
+        return Results.Problem("Failed to build execution status", statusCode: 500);
+    }
+});
+
+app.MapGet("/api/design/runs/{runId}/trace", (string runId) =>
+{
+    var runDir = GetRunDir();
+    var runPath = RunPersistence.GetRunDir(runDir, runId);
+    if (!Directory.Exists(runPath))
+        return Results.Problem("Run not found", statusCode: 404);
+
+    var tracePath = Path.Combine(RunPersistence.GetArtifactsDir(runPath), "trace.jsonl");
+    if (!File.Exists(tracePath))
+        return Results.Json(Array.Empty<TraceEventDto>());
+
+    var events = new List<TraceEventDto>();
+    foreach (var line in File.ReadLines(tracePath))
+    {
+        if (string.IsNullOrWhiteSpace(line)) continue;
+        try
+        {
+            var obj = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(line);
+            if (obj == null) continue;
+            var getStr = (string k) => obj.TryGetValue(k, out var v) ? v.GetString() : null;
+            var getLong = (string k) => obj.TryGetValue(k, out var v) && v.TryGetInt64(out var n) ? n : (long?)null;
+            events.Add(new TraceEventDto(
+                getStr("Timestamp") ?? "",
+                getStr("Kind") ?? "",
+                getStr("StageName"),
+                getStr("AgentName"),
+                getStr("Message"),
+                getLong("DurationMs")));
+        }
+        catch { /* skip malformed lines */ }
+    }
+    return Results.Json(events);
 });
 
 app.MapGet("/api/design/runs/{runId}/design", (string runId) =>

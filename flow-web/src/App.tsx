@@ -3,10 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "@/components/ui/sonner"
 import { RecentRuns } from "@/components/RecentRuns"
 import { ComposePage } from "@/pages/ComposePage"
-import { RunPage } from "@/pages/RunPage"
 import { TestModeProvider, useTestMode } from "@/contexts/TestModeContext"
+import { RunProvider } from "@/contexts/RunContext"
+import { ThemeProvider, useTheme } from "@/contexts/ThemeContext"
+import { ThemeSwitcher } from "@/components/ThemeSwitcher"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,15 +22,38 @@ const queryClient = new QueryClient({
 
 function Layout({ children }: { children: React.ReactNode }) {
   const { testMode, setTestMode } = useTestMode()
+  const { theme } = useTheme()
+
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
+      <header
+        className={cn(
+          "border-b-[var(--border-width)] border-[var(--border)] bg-[var(--card)]"
+        )}
+      >
         <div className="container mx-auto flex items-center gap-6 px-4 py-3">
-          <Link
-            to="/"
-            className="text-lg font-semibold hover:text-primary"
-          >
-            Flow
+          <Link to="/" className="flex items-center gap-3 hover:opacity-80">
+            <div
+              className={cn(
+                "flex items-center justify-center font-bold",
+                theme === "retro"
+                  ? "h-[60px] w-[60px] rounded-[16px] border-[3px] border-[var(--border)] bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 text-2xl text-white shadow-[4px_4px_0_var(--border)]"
+                  : "h-10 w-10 rounded-lg bg-primary text-primary-foreground"
+              )}
+            >
+              F
+            </div>
+            <div>
+              <span className="text-lg font-semibold">Flow</span>
+              {theme === "retro" && (
+                <p
+                  className="text-[var(--muted-foreground)]"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  Design your AI agent with ease
+                </p>
+              )}
+            </div>
           </Link>
           <nav className="flex items-center gap-4">
             <Link
@@ -38,7 +64,8 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <RecentRuns />
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-4">
+            <ThemeSwitcher />
             {testMode && (
               <span className="text-xs font-medium rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
                 Test
@@ -65,16 +92,19 @@ function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TestModeProvider>
-        <BrowserRouter>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<ComposePage />} />
-              <Route path="/runs/:runId" element={<RunPage />} />
-            </Routes>
-          </Layout>
-        </BrowserRouter>
-      </TestModeProvider>
+      <ThemeProvider>
+        <TestModeProvider>
+          <RunProvider>
+            <BrowserRouter>
+              <Layout>
+                <Routes>
+                  <Route path="/" element={<ComposePage />} />
+                </Routes>
+              </Layout>
+            </BrowserRouter>
+          </RunProvider>
+        </TestModeProvider>
+      </ThemeProvider>
       <Toaster position="top-right" richColors />
     </QueryClientProvider>
   )

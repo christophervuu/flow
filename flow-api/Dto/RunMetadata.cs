@@ -12,7 +12,8 @@ public record RunMetadata(
     [property: JsonPropertyName("blockingQuestions")] List<QuestionDto>? BlockingQuestions = null,
     [property: JsonPropertyName("nonBlockingQuestions")] List<QuestionDto>? NonBlockingQuestions = null,
     [property: JsonPropertyName("remainingOpenQuestionsCount")] int? RemainingOpenQuestionsCount = null,
-    [property: JsonPropertyName("assumptionsCount")] int? AssumptionsCount = null);
+    [property: JsonPropertyName("assumptionsCount")] int? AssumptionsCount = null,
+    [property: JsonPropertyName("executionStatus")] ExecutionStatusDto? ExecutionStatus = null);
 
 public record ArtifactPathsDto(
     [property: JsonPropertyName("state")] string State,

@@ -1,14 +1,17 @@
 import type {
   CreateRunRequest,
+  ExecutionStatusDto,
   RunEnvelope,
   RunMetadata,
   SubmitAnswersRequest,
+  TraceEvent,
 } from "@/types"
 import { getTestMode } from "@/lib/testMode"
 import {
   mockRunEnvelope,
   mockRunMetadata,
   mockDesignMarkdown,
+  mockExecutionStatus,
 } from "@/lib/apiMocks"
 
 const API_BASE = "/api"
@@ -84,4 +87,26 @@ export async function getDesign(runId: string): Promise<string> {
     throw new Error(await parseErrorResponse(res))
   }
   return res.text()
+}
+
+export async function getExecutionStatus(runId: string): Promise<ExecutionStatusDto> {
+  if (getTestMode()) {
+    return Promise.resolve(mockExecutionStatus(runId))
+  }
+  const res = await fetch(`${API_BASE}/design/runs/${runId}/status`)
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res))
+  }
+  return res.json()
+}
+
+export async function getTrace(runId: string): Promise<TraceEvent[]> {
+  if (getTestMode()) {
+    return Promise.resolve([])
+  }
+  const res = await fetch(`${API_BASE}/design/runs/${runId}/trace`)
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res))
+  }
+  return res.json()
 }

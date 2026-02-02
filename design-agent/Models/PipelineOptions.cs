@@ -6,7 +6,7 @@ namespace design_agent.Models;
 public record PipelineOptions(
     bool DeepCritique = false,
     int Variants = 1,
-    bool Trace = false,
+    bool Trace = true,
     IReadOnlyList<string>? SynthSpecialists = null,
     bool AllowAssumptions = false,
     bool RunConsistencyCheck = false)

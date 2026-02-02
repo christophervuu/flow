@@ -22,6 +22,31 @@ export interface ArtifactPathsDto {
   designDoc: string
 }
 
+export interface ProgressDto {
+  current: number
+  total: number
+}
+
+export interface ExecutionStatusDto {
+  runId: string
+  status: string
+  currentStage: string
+  currentAgent: string | null
+  completedAgents: string[]
+  activeAgents: string[]
+  pendingAgents: string[]
+  progress: ProgressDto
+}
+
+export interface TraceEvent {
+  timestamp: string
+  kind: string
+  stageName: string | null
+  agentName: string | null
+  message: string | null
+  durationMs: number | null
+}
+
 export interface RunMetadata {
   runId: string
   status: string
@@ -33,6 +58,7 @@ export interface RunMetadata {
   nonBlockingQuestions?: QuestionDto[] | null
   remainingOpenQuestionsCount?: number | null
   assumptionsCount?: number | null
+  executionStatus?: ExecutionStatusDto | null
 }
 
 export interface CreateRunRequest {

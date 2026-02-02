@@ -4,11 +4,15 @@ import { Loader2Icon } from "lucide-react"
 import { getRun } from "@/lib/api"
 import { ClarifyPage } from "./ClarifyPage"
 import { ResultsPage } from "./ResultsPage"
+import { ExecutionDAG } from "@/components/ExecutionDAG"
+import { useTheme } from "@/contexts/ThemeContext"
+import { cn } from "@/lib/utils"
 
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
+  const { theme } = useTheme()
   const initialDesign = (location.state as { designDocMarkdown?: string } | null)?.designDocMarkdown
 
   const { data: meta, isLoading, error, refetch } = useQuery({
@@ -60,10 +64,58 @@ export function RunPage() {
 
   if (status === "Running") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
-        <Loader2Icon className="size-8 animate-spin text-muted-foreground" />
-        <p className="text-muted-foreground">Running design pipeline…</p>
-        <p className="text-sm text-muted-foreground">This may take a minute.</p>
+      <div
+        className={cn(
+          "grid gap-6 transition-all duration-500",
+          "grid-cols-1",
+          "lg:grid-cols-[520px_1fr]"
+        )}
+      >
+        <div
+          className={cn(
+            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+          )}
+        >
+          <div className="flex items-center gap-3 mb-6">
+            {theme === "retro" && (
+              <div
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-green)] text-xl"
+                aria-hidden
+              >
+                🎨
+              </div>
+            )}
+            <h2 className="text-xl font-semibold">Run in progress</h2>
+          </div>
+          <p className="text-[var(--muted-foreground)] mb-4">
+            Design pipeline is running. This may take a minute.
+          </p>
+          <p className="font-mono text-sm text-[var(--muted-foreground)]">
+            {runId}
+          </p>
+        </div>
+
+        <div
+          className={cn(
+            "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)]"
+          )}
+        >
+          <ExecutionDAG runId={runId} status={status} />
+          <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6">
+            <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
+              <div
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
+                aria-hidden
+              >
+                📝
+              </div>
+              <h4 className="font-semibold">Agent Response</h4>
+            </div>
+            <p className="italic text-[var(--muted-foreground)]">
+              Waiting for execution to complete…
+            </p>
+          </div>
+        </div>
       </div>
     )
   }
