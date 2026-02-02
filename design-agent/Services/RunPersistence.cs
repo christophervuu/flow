@@ -1,151 +1,66 @@
-using System.Text.Json;
+using AgentCore;
 using design_agent.Models;
 
 namespace design_agent.Services;
 
 public static class RunPersistence
 {
-    /// <summary>
-    /// Validates GITHUB_TOKEN and exits the process with code 1 if missing (for CLI use).
-    /// </summary>
-    public static void ValidateGitHubToken()
-    {
-        try
-        {
-            ValidateGitHubTokenOrThrow();
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            Environment.Exit(1);
-        }
-    }
+    public static void ValidateGitHubToken() => ChatClientFactory.ValidateGitHubToken();
+    public static void ValidateGitHubTokenOrThrow() => ChatClientFactory.ValidateGitHubTokenOrThrow();
 
-    /// <summary>
-    /// Validates GITHUB_TOKEN and throws if missing (for API use; avoids Environment.Exit).
-    /// </summary>
-    public static void ValidateGitHubTokenOrThrow()
-    {
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GITHUB_TOKEN")))
-        {
-            throw new InvalidOperationException(
-                "GITHUB_TOKEN environment variable is required. Set it with a PAT that has GitHub Models (models: read) access.");
-        }
-    }
+    public static string GetRunDir(string runDir, string runId) =>
+        AgentCore.RunPersistence.GetRunDir(runDir, "design-agent", runId);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNameCaseInsensitive = true
-    };
+    public static string GetArtifactsDir(string runPath) => AgentCore.RunPersistence.GetArtifactsDir(runPath);
+    public static string GetPublishedDir(string runPath) => AgentCore.RunPersistence.GetPublishedDir(runPath);
 
-    public static string GetRunDir(string runDir, string runId)
-    {
-        var basePath = string.IsNullOrWhiteSpace(runDir) ? "." : runDir;
-        return Path.Combine(basePath, ".design-agent", "runs", runId);
-    }
+    public static void EnsureRunDirectory(string runPath) => AgentCore.RunPersistence.EnsureRunDirectory(runPath);
 
-    public static string GetArtifactsDir(string runPath) => Path.Combine(runPath, "artifacts");
-    public static string GetPublishedDir(string runPath) => Path.Combine(runPath, "published");
+    public static void SaveState(string runPath, RunState state) =>
+        AgentCore.RunPersistence.SaveState(runPath, state);
 
-    public static void EnsureRunDirectory(string runPath)
-    {
-        Directory.CreateDirectory(GetArtifactsDir(runPath));
-        Directory.CreateDirectory(GetPublishedDir(runPath));
-    }
+    public static RunState LoadState(string runPath) =>
+        AgentCore.RunPersistence.LoadState<RunState>(runPath);
 
-    public static void SaveState(string runPath, RunState state)
-    {
-        var path = Path.Combine(runPath, "state.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(state, JsonOptions));
-    }
+    public static void SaveInput(string runPath, RunInput input) =>
+        AgentCore.RunPersistence.SaveInput(runPath, input);
 
-    public static RunState LoadState(string runPath)
-    {
-        var path = Path.Combine(runPath, "state.json");
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<RunState>(json, JsonOptions)
-            ?? throw new InvalidOperationException($"Failed to load state from {path}");
-    }
+    public static RunInput LoadInput(string runPath) =>
+        AgentCore.RunPersistence.LoadInput<RunInput>(runPath);
 
-    public static void SaveInput(string runPath, RunInput input)
-    {
-        var path = Path.Combine(runPath, "input.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(input, JsonOptions));
-    }
+    public static void SaveClarifier(string runPath, ClarifierOutput output) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "clarifier.json", output);
 
-    public static RunInput LoadInput(string runPath)
-    {
-        var path = Path.Combine(runPath, "input.json");
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<RunInput>(json, JsonOptions)
-            ?? throw new InvalidOperationException($"Failed to load input from {path}");
-    }
+    public static ClarifierOutput LoadClarifier(string runPath) =>
+        AgentCore.RunPersistence.LoadArtifactJson<ClarifierOutput>(runPath, "clarifier.json");
 
-    public static void SaveClarifier(string runPath, ClarifierOutput output)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "clarifier.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(output, JsonOptions));
-    }
+    public static void SaveClarifiedSpec(string runPath, ClarifiedSpec spec) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "clarifiedSpec.json", spec);
 
-    public static ClarifierOutput LoadClarifier(string runPath)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "clarifier.json");
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<ClarifierOutput>(json, JsonOptions)
-            ?? throw new InvalidOperationException($"Failed to load clarifier from {path}");
-    }
+    public static ClarifiedSpec LoadClarifiedSpec(string runPath) =>
+        AgentCore.RunPersistence.LoadArtifactJson<ClarifiedSpec>(runPath, "clarifiedSpec.json");
 
-    public static void SaveClarifiedSpec(string runPath, ClarifiedSpec spec)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "clarifiedSpec.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(spec, JsonOptions));
-    }
+    public static void SaveProposedDesign(string runPath, ProposedDesign design) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "proposedDesign.json", design);
 
-    public static ClarifiedSpec LoadClarifiedSpec(string runPath)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "clarifiedSpec.json");
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<ClarifiedSpec>(json, JsonOptions)
-            ?? throw new InvalidOperationException($"Failed to load clarifiedSpec from {path}");
-    }
+    public static void SaveCritique(string runPath, Critique critique) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "critique.json", critique);
 
-    public static void SaveProposedDesign(string runPath, ProposedDesign design)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "proposedDesign.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(design, JsonOptions));
-    }
-
-    public static void SaveCritique(string runPath, Critique critique)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "critique.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(critique, JsonOptions));
-    }
-
-    public static void SaveOptimizedDesign(string runPath, OptimizedDesign design)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), "optimizedDesign.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(design, JsonOptions));
-    }
+    public static void SaveOptimizedDesign(string runPath, OptimizedDesign design) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "optimizedDesign.json", design);
 
     public static void SavePublishedPackage(string runPath, PublishedPackage package)
     {
-        var path = Path.Combine(GetArtifactsDir(runPath), "publishedPackage.json");
-        File.WriteAllText(path, JsonSerializer.Serialize(package, JsonOptions));
-
-        var designPath = Path.Combine(GetPublishedDir(runPath), "DESIGN.md");
-        File.WriteAllText(designPath, package.DesignDocMarkdown ?? "");
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "publishedPackage.json", package);
+        AgentCore.RunPersistence.SavePublishedText(runPath, "DESIGN.md", package.DesignDocMarkdown ?? "");
     }
 
-    public static void SaveRawAgentOutput(string runPath, string agentName, string rawOutput)
-    {
-        var path = Path.Combine(GetArtifactsDir(runPath), $"{agentName}.raw.txt");
-        File.WriteAllText(path, rawOutput);
-    }
+    public static void SaveRawAgentOutput(string runPath, string agentName, string rawOutput) =>
+        AgentCore.RunPersistence.SaveArtifactText(runPath, $"{agentName}.raw.txt", rawOutput);
 
     public static string? GetDesignMarkdownPath(string runPath)
     {
-        var path = Path.Combine(GetPublishedDir(runPath), "DESIGN.md");
+        var path = Path.Combine(AgentCore.RunPersistence.GetPublishedDir(runPath), "DESIGN.md");
         return File.Exists(path) ? path : null;
     }
 

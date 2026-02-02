@@ -1,8 +1,11 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace design_agent.Services;
+namespace AgentCore;
 
+/// <summary>
+/// JSON parsing with tolerant behavior: extracts from ```json ... ``` fences, case-insensitive, trailing commas.
+/// </summary>
 public static class JsonHelper
 {
     private static readonly JsonSerializerOptions Options = new()

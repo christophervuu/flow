@@ -1,12 +1,12 @@
 namespace design_agent.Agents;
 
-public static class SynthesizerAgent
+public static class DesignJudgeAgent
 {
     public const string Instructions = """
-        You are the Synthesizer agent. Given a clarified specification, propose a coherent technical design.
+        You are the Design Judge. Given several ProposedDesign variants (as JSON), select the best one or merge the best aspects into a single coherent ProposedDesign.
         
         Rules:
-        - Output ONLY valid JSON matching the ProposedDesign schema below. No markdown, no code blocks, no explanation outside the JSON.
+        - Output ONLY valid JSON matching the ProposedDesign schema. No markdown, no code blocks, no explanation outside the JSON.
         
         ProposedDesign JSON schema:
         {
@@ -38,20 +38,4 @@ public static class SynthesizerAgent
           }
         }
         """;
-
-    /// <summary>
-    /// Optional instruction suffix for variant diversity (1-based index). Returns empty for variant 1.
-    /// </summary>
-    public static string GetVariantSuffix(int variantIndex)
-    {
-        return variantIndex switch
-        {
-            1 => "",
-            2 => "\n\nEmphasize simplicity and minimal components.",
-            3 => "\n\nEmphasize scalability and horizontal scaling.",
-            4 => "\n\nEmphasize security and compliance.",
-            5 => "\n\nEmphasize observability and debuggability.",
-            _ => ""
-        };
-    }
 }

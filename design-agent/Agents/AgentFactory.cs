@@ -1,5 +1,4 @@
-using Azure;
-using Azure.AI.Inference;
+using AgentCore;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 
@@ -7,44 +6,36 @@ namespace design_agent.Agents;
 
 public static class AgentFactory
 {
-    public static IChatClient CreateChatClient()
+    public static IChatClient CreateChatClient() => ChatClientFactory.CreateChatClient();
+
+    private static ChatClientAgent CreateAgent(IChatClient chatClient, string instructions, string name, IReadOnlyList<AIFunction>? tools = null)
     {
-        var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN")
-            ?? throw new InvalidOperationException("GITHUB_TOKEN is required.");
-
-        var endpoint = Environment.GetEnvironmentVariable("GITHUB_MODELS_ENDPOINT")
-            ?? "https://models.github.ai/inference";
-        var model = Environment.GetEnvironmentVariable("GITHUB_MODELS_MODEL") ?? "openai/gpt-4.1";
-
-        var client = new ChatCompletionsClient(
-            new Uri(endpoint),
-            new AzureKeyCredential(token));
-
-        return client.AsIChatClient(model);
+        if (tools is null or { Count: 0 })
+            return new ChatClientAgent(chatClient, instructions: instructions, name: name);
+        return new ChatClientAgent(chatClient, instructions: instructions, name: name, tools: tools.Cast<AITool>().ToList());
     }
 
-    public static ChatClientAgent CreateClarifierAgent(IChatClient chatClient) => new(
-        chatClient,
-        instructions: ClarifierAgent.Instructions,
-        name: "Clarifier");
+    public static ChatClientAgent CreateClarifierAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, ClarifierAgent.Instructions, "Clarifier", tools);
 
-    public static ChatClientAgent CreateSynthesizerAgent(IChatClient chatClient) => new(
-        chatClient,
-        instructions: SynthesizerAgent.Instructions,
-        name: "Synthesizer");
+    public static ChatClientAgent CreateSynthesizerAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, SynthesizerAgent.Instructions, "Synthesizer", tools);
 
-    public static ChatClientAgent CreateChallengerAgent(IChatClient chatClient) => new(
-        chatClient,
-        instructions: ChallengerAgent.Instructions,
-        name: "Challenger");
+    public static ChatClientAgent CreateChallengerAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, ChallengerAgent.Instructions, "Challenger", tools);
 
-    public static ChatClientAgent CreateOptimizerAgent(IChatClient chatClient) => new(
-        chatClient,
-        instructions: OptimizerAgent.Instructions,
-        name: "Optimizer");
+    public static ChatClientAgent CreateOptimizerAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, OptimizerAgent.Instructions, "Optimizer", tools);
 
-    public static ChatClientAgent CreatePublisherAgent(IChatClient chatClient) => new(
-        chatClient,
-        instructions: PublisherAgent.Instructions,
-        name: "Publisher");
+    public static ChatClientAgent CreatePublisherAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, PublisherAgent.Instructions, "Publisher", tools);
+
+    public static ChatClientAgent CreateDesignJudgeAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, DesignJudgeAgent.Instructions, "DesignJudge", tools);
+
+    public static ChatClientAgent CreateCritiqueJudgeAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, CritiqueJudgeAgent.Instructions, "CritiqueJudge", tools);
+
+    public static ChatClientAgent CreateChallengerPersonaAgent(IChatClient chatClient, string personaName, string instructions, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, instructions, $"Challenger_{personaName}", tools);
 }

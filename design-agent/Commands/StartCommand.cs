@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using design_agent.Models;
 
 namespace design_agent.Commands;
 
@@ -13,22 +14,28 @@ public static class StartCommand
         var promptOption = new Option<string>("--prompt", "Initial freeform prompt") { IsRequired = true };
         var runDirOption = new Option<string>("--run-dir", () => ".", "Base directory for runs (default: current directory)");
         var jsonOption = new Option<bool>("--json", "Output a single JSON envelope (runId, status, questions, designDocMarkdown)");
+        var deepCritiqueOption = new Option<bool>("--deep-critique", () => false, "Run multiple Challenger personas (Security, Operations, Cost, Edge Cases) and merge");
+        var variantsOption = new Option<int>("--variants", () => 1, "Number of Synthesizer variants (1-5); default 1");
+        var traceOption = new Option<bool>("--trace", () => false, "Emit trace artifact (artifacts/trace.jsonl) for debugging");
 
         var command = new Command("start", "Start a new design run");
         command.AddOption(titleOption);
         command.AddOption(promptOption);
         command.AddOption(runDirOption);
         command.AddOption(jsonOption);
+        command.AddOption(deepCritiqueOption);
+        command.AddOption(variantsOption);
+        command.AddOption(traceOption);
 
-        command.SetHandler(async (title, prompt, runDir, json) =>
+        command.SetHandler(async (title, prompt, runDir, json, deepCritique, variants, trace) =>
         {
-            await ExecuteAsync(title!, prompt!, runDir ?? ".", json);
-        }, titleOption, promptOption, runDirOption, jsonOption);
+            await ExecuteAsync(title!, prompt!, runDir ?? ".", json, new PipelineOptions(deepCritique, variants, trace));
+        }, titleOption, promptOption, runDirOption, jsonOption, deepCritiqueOption, variantsOption, traceOption);
 
         return command;
     }
 
-    private static async Task ExecuteAsync(string title, string prompt, string runDir, bool json)
+    private static async Task ExecuteAsync(string title, string prompt, string runDir, bool json, PipelineOptions pipelineOptions)
     {
         design_agent.Services.RunPersistence.ValidateGitHubToken();
 
@@ -73,7 +80,7 @@ public static class StartCommand
         var clarifiedSpec = design_agent.Services.ClarifiedSpecHelper.CreateFromDraft(draft, new Dictionary<string, string>());
         design_agent.Services.RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
 
-        var (_, _, _, published) = await design_agent.Services.PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec);
+        var (_, _, _, published) = await design_agent.Services.PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, null, pipelineOptions);
 
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         design_agent.Services.RunPersistence.SaveState(runPath, state);
