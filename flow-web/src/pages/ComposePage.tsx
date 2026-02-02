@@ -8,6 +8,7 @@ import { addRecentRun } from "@/lib/storage"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useRun } from "@/contexts/RunContext"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,6 +20,14 @@ import { cn } from "@/lib/utils"
 
 const emptyContext: StructuredContext = {}
 
+const SYNTH_SPECIALIST_OPTIONS: { key: string; label: string }[] = [
+  { key: "architecture", label: "Architecture" },
+  { key: "contracts", label: "Contracts" },
+  { key: "requirements", label: "Requirements" },
+  { key: "ops", label: "Ops" },
+  { key: "security", label: "Security" },
+]
+
 export function ComposePage() {
   const { theme } = useTheme()
   const { runId, setRunId } = useRun()
@@ -27,14 +36,21 @@ export function ComposePage() {
   const [prompt, setPrompt] = useState("")
   const [context, setContext] = useState<StructuredContext>(emptyContext)
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [synthSpecialists, setSynthSpecialists] = useState<string[]>([])
+  const [allowAssumptions, setAllowAssumptions] = useState(false)
   const [initialDesignMarkdown, setInitialDesignMarkdown] = useState<string | null>(null)
   const [submittedPrompt, setSubmittedPrompt] = useState("")
   const [submittedTitle, setSubmittedTitle] = useState("")
 
   // Non-blocking run creation mutation
   const createRunMutation = useMutation({
-    mutationFn: (params: { title: string; prompt: string; context?: { links?: string[]; notes?: string } }) =>
-      createRun(params),
+    mutationFn: (params: {
+      title: string
+      prompt: string
+      context?: { links?: string[]; notes?: string }
+      synthSpecialists?: string[] | null
+      allowAssumptions?: boolean
+    }) => createRun(params),
     onSuccess: (envelope) => {
       addRecentRun(envelope.runId, submittedTitle)
       setRunId(envelope.runId)
@@ -69,8 +85,16 @@ export function ComposePage() {
   })
 
   const submitAnswersMutation = useMutation({
-    mutationFn: (answersPayload: Record<string, string>) =>
-      submitAnswers(runId!, { answers: answersPayload }),
+    mutationFn: (payload: {
+      answers: Record<string, string>
+      synthSpecialists?: string[] | null
+      allowAssumptions?: boolean
+    }) =>
+      submitAnswers(runId!, {
+        answers: payload.answers,
+        ...(payload.synthSpecialists != null ? { synthSpecialists: payload.synthSpecialists } : {}),
+        ...(payload.allowAssumptions != null ? { allowAssumptions: payload.allowAssumptions } : {}),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["run", runId] })
       toast.success("Answers submitted")
@@ -118,6 +142,8 @@ export function ComposePage() {
       title: title.trim(),
       prompt: finalPrompt,
       ...(links?.length || notes ? { context: { links, notes } } : {}),
+      ...(synthSpecialists.length > 0 ? { synthSpecialists } : {}),
+      allowAssumptions,
     })
   }
 
@@ -135,12 +161,16 @@ export function ComposePage() {
       toast.error("Please answer all blocking questions")
       return
     }
-    const payload: Record<string, string> = {}
+    const answersPayload: Record<string, string> = {}
     for (const q of [...blocking, ...nonBlocking]) {
       const val = answers[q.id]?.trim()
-      if (val) payload[q.id] = val
+      if (val) answersPayload[q.id] = val
     }
-    submitAnswersMutation.mutate(payload)
+    submitAnswersMutation.mutate({
+      answers: answersPayload,
+      synthSpecialists: synthSpecialists.length > 0 ? synthSpecialists : undefined,
+      allowAssumptions,
+    })
   }
 
   const status = meta?.status
@@ -227,6 +257,49 @@ export function ComposePage() {
                 onChange={setContext}
                 disabled={createRunMutation.isPending}
               />
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Specialist synthesizers</Label>
+              <p className="text-xs text-muted-foreground">
+                Optional: run specialist agents for specific design sections.
+              </p>
+              <div className="flex flex-wrap gap-4">
+                {SYNTH_SPECIALIST_OPTIONS.map(({ key, label }) => (
+                  <label
+                    key={key}
+                    className="flex items-center gap-2 cursor-pointer text-sm"
+                  >
+                    <Checkbox
+                      checked={synthSpecialists.includes(key)}
+                      onCheckedChange={(checked) => {
+                        setSynthSpecialists((prev) =>
+                          checked ? [...prev, key] : prev.filter((k) => k !== key)
+                        )
+                      }}
+                      disabled={createRunMutation.isPending}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="allow-assumptions"
+                checked={allowAssumptions}
+                onCheckedChange={(checked) =>
+                  setAllowAssumptions(checked === true)
+                }
+                disabled={createRunMutation.isPending}
+              />
+              <Label
+                htmlFor="allow-assumptions"
+                className="text-sm font-medium cursor-pointer"
+              >
+                Allow assumptions for unanswered questions
+              </Label>
             </div>
 
             <Button
@@ -331,7 +404,11 @@ export function ComposePage() {
         )}
       >
         {/* Always show ExecutionDAG at the top */}
-        <ExecutionDAG runId={runId!} status={isPending ? "Running" : (status ?? "Running")} />
+        <ExecutionDAG
+          runId={runId!}
+          status={isPending ? "Running" : (status ?? "Running")}
+          executionStatus={meta?.executionStatus ?? undefined}
+        />
 
         {/* Status-dependent content below the DAG */}
         {(status === "Running" || isPending) && (
@@ -370,6 +447,47 @@ export function ComposePage() {
                 onChange={setAnswers}
                 disabled={submitAnswersMutation.isPending}
               />
+              <div className="space-y-3">
+                <Label className="text-sm font-medium">Specialist synthesizers</Label>
+                <p className="text-xs text-muted-foreground">
+                  Optional: run specialist agents for specific design sections.
+                </p>
+                <div className="flex flex-wrap gap-4">
+                  {SYNTH_SPECIALIST_OPTIONS.map(({ key, label }) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 cursor-pointer text-sm"
+                    >
+                      <Checkbox
+                        checked={synthSpecialists.includes(key)}
+                        onCheckedChange={(checked) => {
+                          setSynthSpecialists((prev) =>
+                            checked ? [...prev, key] : prev.filter((k) => k !== key)
+                          )
+                        }}
+                        disabled={submitAnswersMutation.isPending}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="allow-assumptions-clarify"
+                  checked={allowAssumptions}
+                  onCheckedChange={(checked) =>
+                    setAllowAssumptions(checked === true)
+                  }
+                  disabled={submitAnswersMutation.isPending}
+                />
+                <Label
+                  htmlFor="allow-assumptions-clarify"
+                  className="text-sm font-medium cursor-pointer"
+                >
+                  Allow assumptions for unanswered questions
+                </Label>
+              </div>
               <Button
                 type="submit"
                 disabled={submitAnswersMutation.isPending}

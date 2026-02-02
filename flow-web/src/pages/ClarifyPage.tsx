@@ -4,8 +4,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { submitAnswers } from "@/lib/api"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
 import { QuestionSection } from "@/components/QuestionSection"
 import type { RunEnvelope } from "@/types"
+
+const SYNTH_SPECIALIST_OPTIONS: { key: string; label: string }[] = [
+  { key: "architecture", label: "Architecture" },
+  { key: "contracts", label: "Contracts" },
+  { key: "requirements", label: "Requirements" },
+  { key: "ops", label: "Ops" },
+  { key: "security", label: "Security" },
+]
 
 interface ClarifyPageProps {
   runId: string
@@ -16,8 +26,16 @@ export function ClarifyPage({ runId, run }: ClarifyPageProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const mutation = useMutation({
-    mutationFn: (answers: Record<string, string>) =>
-      submitAnswers(runId, { answers }),
+    mutationFn: (payload: {
+      answers: Record<string, string>
+      synthSpecialists?: string[] | null
+      allowAssumptions?: boolean
+    }) =>
+      submitAnswers(runId, {
+        answers: payload.answers,
+        ...(payload.synthSpecialists != null ? { synthSpecialists: payload.synthSpecialists } : {}),
+        ...(payload.allowAssumptions != null ? { allowAssumptions: payload.allowAssumptions } : {}),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["run", runId] })
       toast.success("Answers submitted")
@@ -29,6 +47,8 @@ export function ClarifyPage({ runId, run }: ClarifyPageProps) {
   })
 
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [synthSpecialists, setSynthSpecialists] = useState<string[]>([])
+  const [allowAssumptions, setAllowAssumptions] = useState(false)
   const blocking = run.blockingQuestions ?? []
   const nonBlocking = run.nonBlockingQuestions ?? []
 
@@ -47,12 +67,16 @@ export function ClarifyPage({ runId, run }: ClarifyPageProps) {
       toast.error("Please answer all blocking questions")
       return
     }
-    const payload: Record<string, string> = {}
+    const answersPayload: Record<string, string> = {}
     for (const q of [...blocking, ...nonBlocking]) {
       const val = answers[q.id]?.trim()
-      if (val) payload[q.id] = val
+      if (val) answersPayload[q.id] = val
     }
-    mutation.mutate(payload)
+    mutation.mutate({
+      answers: answersPayload,
+      synthSpecialists: synthSpecialists.length > 0 ? synthSpecialists : undefined,
+      allowAssumptions,
+    })
   }
 
   return (
@@ -70,6 +94,49 @@ export function ClarifyPage({ runId, run }: ClarifyPageProps) {
           onChange={setAnswers}
           disabled={mutation.isPending}
         />
+
+        <div className="space-y-3">
+          <Label className="text-sm font-medium">Specialist synthesizers</Label>
+          <p className="text-xs text-muted-foreground">
+            Optional: run specialist agents for specific design sections.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            {SYNTH_SPECIALIST_OPTIONS.map(({ key, label }) => (
+              <label
+                key={key}
+                className="flex items-center gap-2 cursor-pointer text-sm"
+              >
+                <Checkbox
+                  checked={synthSpecialists.includes(key)}
+                  onCheckedChange={(checked) => {
+                    setSynthSpecialists((prev) =>
+                      checked ? [...prev, key] : prev.filter((k) => k !== key)
+                    )
+                  }}
+                  disabled={mutation.isPending}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="allow-assumptions"
+            checked={allowAssumptions}
+            onCheckedChange={(checked) =>
+              setAllowAssumptions(checked === true)
+            }
+            disabled={mutation.isPending}
+          />
+          <Label
+            htmlFor="allow-assumptions"
+            className="text-sm font-medium cursor-pointer"
+          >
+            Allow assumptions for unanswered questions
+          </Label>
+        </div>
 
         <div className="flex gap-2">
           <Button type="submit" disabled={mutation.isPending}>

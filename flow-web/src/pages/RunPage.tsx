@@ -100,7 +100,11 @@ export function RunPage() {
             "rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline"
           )}
         >
-          <ExecutionDAG runId={runId} status={status} />
+          <ExecutionDAG
+            runId={runId}
+            status={status}
+            executionStatus={meta?.executionStatus ?? undefined}
+          />
           <div className="mt-6 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
             <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
               <div

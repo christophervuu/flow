@@ -3,10 +3,12 @@ import { useQuery } from "@tanstack/react-query"
 import { getExecutionStatus } from "@/lib/api"
 import { AgentStep } from "./AgentStep"
 import { cn } from "@/lib/utils"
+import type { ExecutionStatusDto } from "@/types"
 
 interface ExecutionDAGProps {
   runId: string
   status: string
+  executionStatus?: ExecutionStatusDto | null
 }
 
 const DEFAULT_AGENTS = [
@@ -40,24 +42,27 @@ function getOrderedSteps(
   return order
 }
 
-export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
+export function ExecutionDAG({ runId, status, executionStatus: executionStatusProp }: ExecutionDAGProps) {
   const [hideFlow, setHideFlow] = useState(false)
 
   const isRunning = status === "Running"
   const isCompleted = status === "Completed"
   const isPending = runId === "pending"
 
-  const { data: execStatus } = useQuery({
+  const { data: execStatus, isLoading: execStatusLoading } = useQuery({
     queryKey: ["execution-status", runId],
     queryFn: () => getExecutionStatus(runId),
     enabled: !!runId && runId !== "pending" && isRunning,
     refetchInterval: isRunning ? 1000 : false,
   })
 
-  // For completed runs, show all agents as completed
+  // Use prop when completed so parent can pass meta.executionStatus; otherwise use fetched execStatus
+  const resolvedStatus = isCompleted && executionStatusProp ? executionStatusProp : execStatus
+
+  // For completed runs, use actual execution status when provided; else fallback to DEFAULT_AGENTS
   // For pending runs, show all agents as pending
   const completed = isCompleted
-    ? DEFAULT_AGENTS
+    ? (resolvedStatus?.completedAgents?.length ? resolvedStatus.completedAgents : DEFAULT_AGENTS)
     : isPending
       ? []
       : (execStatus?.completedAgents ?? [])
@@ -68,6 +73,8 @@ export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
       ? DEFAULT_AGENTS
       : (execStatus?.pendingAgents ?? [])
   const steps = getOrderedSteps(completed, active, pending)
+
+  const showExecutionStatusLoading = isRunning && !isPending && execStatusLoading
 
   return (
     <div className="space-y-4">
@@ -109,6 +116,16 @@ export function ExecutionDAG({ runId, status }: ExecutionDAGProps) {
                 <div className="font-semibold">Starting run…</div>
                 <div className="text-sm text-[var(--muted-foreground)]">
                   Connecting to agent pipeline…
+                </div>
+              </div>
+            </div>
+          ) : showExecutionStatusLoading ? (
+            <div className="flex items-center gap-4 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--background)] p-4 retro-card-outline">
+              <div className="size-8 animate-spin rounded-full border-2 border-[var(--border)] border-t-transparent" />
+              <div>
+                <div className="font-semibold">Loading execution status…</div>
+                <div className="text-sm text-[var(--muted-foreground)]">
+                  Fetching pipeline progress…
                 </div>
               </div>
             </div>

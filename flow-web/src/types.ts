@@ -68,6 +68,8 @@ export interface CreateRunRequest {
     links?: string[]
     notes?: string
   }
+  synthSpecialists?: string[] | null
+  allowAssumptions?: boolean
 }
 
 export interface SubmitAnswersRequest {
