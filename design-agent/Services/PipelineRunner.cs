@@ -33,7 +33,7 @@ public static class PipelineRunner
         return new ClarifierResult(output, (output.Questions ?? []).Any(q => q.Blocking));
     }
 
-    public static async Task<(ProposedDesign Design, Critique Critique, OptimizedDesign Optimized, PublishedPackage Published)> RunRemainingPipelineAsync(
+    public static async Task<RunRemainingPipelineResult> RunRemainingPipelineAsync(
         string runPath,
         ClarifiedSpec clarifiedSpec,
         IReadOnlyDictionary<string, string>? answers = null,
@@ -52,8 +52,16 @@ public static class PipelineRunner
             ? "\n\nUser-provided answers to blocking questions:\n" + string.Join("\n", answers.Select(kv => $"{kv.Key}: {kv.Value}"))
             : "";
 
-        ProposedDesign proposed;
-        if (opts.VariantsClamped > 1)
+        ProposedDesign? proposed = null;
+        List<Question>? awaitingSynthQuestions = null;
+        var specialists = opts.SynthSpecialists?.Where(SpecialistSynthesizerAgents.IsKnownSpecialist).ToList();
+        if (specialists is { Count: > 0 })
+        {
+            var (design, awaiting) = await RunHybridSynthesisAsync(runPath, chatClient, runTools, specJson, answersText, specialists, opts.AllowAssumptions, OnEvent);
+            proposed = design;
+            awaitingSynthQuestions = awaiting;
+        }
+        else if (opts.VariantsClamped > 1)
         {
             proposed = await RunSynthesisWithVariantsAsync(runPath, chatClient, runTools, specJson, answersText, opts.VariantsClamped, OnEvent);
         }
@@ -67,8 +75,26 @@ public static class PipelineRunner
                 s => JsonHelper.TryDeserialize<ProposedDesign>(s), OnEvent);
         }
 
+        if (awaitingSynthQuestions != null)
+            return new PipelineAwaitingSynthQuestions(awaitingSynthQuestions);
+
+        if (proposed == null)
+            throw new InvalidOperationException("Pipeline produced no design and no pending questions.");
+
         RunPersistence.SaveProposedDesign(runPath, proposed);
         var proposedJson = JsonSerializer.Serialize(proposed, new JsonSerializerOptions { WriteIndented = false });
+
+        if (opts.RunConsistencyCheck)
+        {
+            var consistencyAgent = AgentFactory.CreateConsistencyCheckerAgent(chatClient, runTools);
+            var report = await JsonStageRunner.RunJsonStageWithRetryAsync(
+                consistencyAgent,
+                $"Proposed design:\n{proposedJson}\n\nProduce your ConsistencyReport JSON.",
+                runPath, "ConsistencyChecker", "ConsistencyChecker",
+                s => JsonHelper.TryDeserialize<ConsistencyReport>(s), OnEvent);
+            if (report != null)
+                RunPersistence.SaveConsistencyReport(runPath, report);
+        }
 
         Critique critique;
         if (opts.DeepCritique)
@@ -99,6 +125,14 @@ public static class PipelineRunner
         var optimizedJson = JsonSerializer.Serialize(optimized, new JsonSerializerOptions { WriteIndented = false });
 
         var publishAgent = AgentFactory.CreatePublisherAgent(chatClient, runTools);
+        var synthQuestions = RunPersistence.LoadSynthQuestions(runPath);
+        var synthAssumptions = RunPersistence.LoadSynthAssumptions(runPath);
+        var openQuestionsBlock = synthQuestions is { Count: > 0 }
+            ? "\n\nRemaining open questions (include in section 14 Open Questions and in remaining_open_questions):\n" + JsonSerializer.Serialize(synthQuestions, new JsonSerializerOptions { WriteIndented = false })
+            : "";
+        var assumptionsBlock = synthAssumptions is { Count: > 0 }
+            ? "\n\nAssumptions made when proceeding without answers (include in section 14 or Assumptions):\n" + JsonSerializer.Serialize(synthAssumptions, new JsonSerializerOptions { WriteIndented = false })
+            : "";
         var published = await JsonStageRunner.RunJsonStageWithRetryAsync(
             publishAgent,
             $"""
@@ -106,15 +140,184 @@ public static class PipelineRunner
             Proposed design: {proposedJson}
             Critique: {critiqueJson}
             Optimized design: {optimizedJson}
-            
-            Produce your PublishedPackage JSON with a complete design_doc_markdown following the 15-section template.
+            {openQuestionsBlock}
+            {assumptionsBlock}
+
+            Produce your PublishedPackage JSON with a complete design_doc_markdown following the 15-section template. Ensure section 14 (Open Questions) and remaining_open_questions include any open questions and assumptions listed above.
             """,
             runPath, "Publisher", "Publisher",
             s => JsonHelper.TryDeserialize<PublishedPackage>(s), OnEvent);
 
         RunPersistence.SavePublishedPackage(runPath, published);
 
-        return (proposed, critique, optimized, published);
+        return new PipelineCompleted(proposed, critique, optimized, published);
+    }
+
+    /// <summary>
+    /// Builds assumptions from blocking questions and persists to artifacts/synth/assumptions.json.
+    /// Returns the list of assumptions (or empty list on parse failure with deterministic fallback).
+    /// </summary>
+    public static async Task<List<AssumptionRecord>> RunAssumptionBuilderAsync(
+        string runPath,
+        List<Question> blockingQuestions,
+        Action<JsonStageEvent>? onEvent = null)
+    {
+        if (blockingQuestions.Count == 0)
+            return [];
+
+        var chatClient = AgentFactory.CreateChatClient();
+        var runTools = RunScopedTools.CreateFunctions(runPath);
+        var questionsJson = JsonSerializer.Serialize(blockingQuestions, new JsonSerializerOptions { WriteIndented = false });
+        var prompt = $"Blocking questions that could not be answered:\n{questionsJson}\n\nProduce your JSON with an \"assumptions\" array (question_id, question_text, assumption, risk) for each.";
+        var agent = AgentFactory.CreateAssumptionBuilderAgent(chatClient, runTools);
+        var output = await JsonStageRunner.RunJsonStageWithRetryAsync(
+            agent,
+            prompt,
+            runPath, "AssumptionBuilder", "AssumptionBuilder",
+            s => JsonHelper.TryDeserialize<AssumptionBuilderOutput>(s), onEvent);
+        var assumptions = output?.Assumptions ?? [];
+        if (assumptions.Count == 0)
+        {
+            assumptions = blockingQuestions.Select(q => new AssumptionRecord(q.Id, q.Text, "Assume TBD; design uses configurable defaults.", "Design may need revision when answer is known.")).ToList();
+        }
+        RunPersistence.SaveSynthAssumptions(runPath, assumptions);
+        return assumptions;
+    }
+
+    private static async Task<(ProposedDesign? Design, List<Question>? AwaitingQuestions)> RunHybridSynthesisAsync(
+        string runPath,
+        IChatClient chatClient,
+        IReadOnlyList<AIFunction> runTools,
+        string specJson,
+        string answersText,
+        List<string> specialists,
+        bool allowAssumptions,
+        Action<JsonStageEvent>? onEvent = null)
+    {
+        RunPersistence.SaveSynthSelection(runPath, new SynthSelection(specialists, allowAssumptions));
+
+        var promptPrefix = $"Clarified specification:\n{specJson}{answersText}\n\nProduce your SpecialistSynthOutput JSON.";
+        var results = await Task.WhenAll(specialists.Select(async key =>
+        {
+            var output = await RunSpecialistStageAsync(runPath, chatClient, runTools, key, promptPrefix, onEvent);
+            return (key, output);
+        }));
+        var specialistOutputs = results.ToDictionary(t => t.key, t => t.output);
+
+        var specialistOutputsJson = JsonSerializer.Serialize(specialistOutputs, new JsonSerializerOptions { WriteIndented = false });
+        var mergerPrompt = $"""
+            Clarified specification:
+            {specJson}
+            {answersText}
+
+            Specialist partial outputs (by key):
+            {specialistOutputsJson}
+
+            Merge these into a single proposed_design. Set missing_sections to the section keys that are still empty and need generic fill. Output MergerOutput JSON.
+            """;
+
+        var mergerAgent = AgentFactory.CreateMergerAgent(chatClient, runTools);
+        var mergerOutput = await JsonStageRunner.RunJsonStageWithRetryAsync(
+            mergerAgent,
+            mergerPrompt,
+            runPath, "Merger", "Merger",
+            s => JsonHelper.TryDeserialize<MergerOutput>(s), onEvent);
+
+        var merged = mergerOutput.ProposedDesign ?? new ProposedDesign(null, null, null, null, null, null, null);
+        RunPersistence.SaveMergedPartial(runPath, mergerOutput);
+
+        var allQuestions = new List<Question>();
+        foreach (var o in specialistOutputs.Values)
+            if (o.Questions is { Count: > 0 })
+                allQuestions.AddRange(o.Questions);
+        if (mergerOutput.Questions is { Count: > 0 })
+            allQuestions.AddRange(mergerOutput.Questions);
+
+        var hasBlocking = allQuestions.Any(q => q.Blocking);
+        if (hasBlocking && !allowAssumptions)
+        {
+            RunPersistence.SaveSynthQuestions(runPath, allQuestions);
+            return (null, allQuestions);
+        }
+        if (hasBlocking && allowAssumptions)
+        {
+            var blocking = allQuestions.Where(q => q.Blocking).ToList();
+            await RunAssumptionBuilderAsync(runPath, blocking, onEvent);
+        }
+
+        var missingSections = mergerOutput.MissingSections ?? [];
+        if (missingSections.Count > 0)
+        {
+            var fillPrompt = $"""
+                Fill ONLY these sections: {string.Join(", ", missingSections)}. Do not modify any other sections.
+                Partial design (merge this with your filled sections):
+                {JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = false })}
+
+                Produce your ProposedDesign JSON. Include all sections; for sections you are not filling, use the values from the partial design above.
+                """;
+            var fillAgent = AgentFactory.CreateSynthesizerAgent(chatClient, runTools);
+            var filled = await JsonStageRunner.RunJsonStageWithRetryAsync(
+                fillAgent,
+                fillPrompt,
+                runPath, "Synthesizer", "Synthesizer_Fill",
+                s => JsonHelper.TryDeserialize<ProposedDesign>(s), onEvent);
+            merged = MergeDesigns(merged, filled, missingSections);
+        }
+
+        return (merged, null);
+    }
+
+    private static ProposedDesign MergeDesigns(ProposedDesign baseDesign, ProposedDesign fillResult, List<string> sectionsToTakeFromFill)
+    {
+        var overview = sectionsToTakeFromFill.Contains("overview") ? (fillResult.Overview ?? baseDesign.Overview) : baseDesign.Overview;
+        var architecture = sectionsToTakeFromFill.Contains("architecture") ? (fillResult.Architecture ?? baseDesign.Architecture) : baseDesign.Architecture;
+        var apiContracts = sectionsToTakeFromFill.Contains("api_contracts") ? (fillResult.ApiContracts ?? baseDesign.ApiContracts) : baseDesign.ApiContracts;
+        var dataModel = sectionsToTakeFromFill.Contains("data_model") ? (fillResult.DataModel ?? baseDesign.DataModel) : baseDesign.DataModel;
+        var failureModes = sectionsToTakeFromFill.Contains("failure_modes") ? (fillResult.FailureModes ?? baseDesign.FailureModes) : baseDesign.FailureModes;
+        var observability = sectionsToTakeFromFill.Contains("observability") ? (fillResult.Observability ?? baseDesign.Observability) : baseDesign.Observability;
+        var security = sectionsToTakeFromFill.Contains("security") ? (fillResult.Security ?? baseDesign.Security) : baseDesign.Security;
+        return new ProposedDesign(overview, architecture, apiContracts, dataModel, failureModes, observability, security);
+    }
+
+    private static async Task<SpecialistSynthOutput> RunSpecialistStageAsync(
+        string runPath,
+        IChatClient chatClient,
+        IReadOnlyList<AIFunction> runTools,
+        string specialistKey,
+        string promptPrefix,
+        Action<JsonStageEvent>? onEvent = null)
+    {
+        var agentName = $"Synth_{specialistKey}";
+        onEvent?.Invoke(new JsonStageEvent("stage_start", "Synthesizer", agentName, null, null));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var agent = AgentFactory.CreateSpecialistSynthesizerAgent(chatClient, specialistKey, runTools);
+        var response = await agent.RunAsync(promptPrefix);
+        var text = response.Text ?? "";
+        onEvent?.Invoke(new JsonStageEvent("model_call", "Synthesizer", agentName, null, sw.ElapsedMilliseconds));
+
+        var result = JsonHelper.TryDeserialize<SpecialistSynthOutput>(text);
+        if (result != null)
+        {
+            onEvent?.Invoke(new JsonStageEvent("stage_end", "Synthesizer", agentName, null, sw.ElapsedMilliseconds));
+            RunPersistence.SaveSynthSpecialistOutput(runPath, specialistKey, result);
+            return result;
+        }
+
+        onEvent?.Invoke(new JsonStageEvent("json_parse_failure", "Synthesizer", agentName, "First parse failed", null));
+        RunPersistence.SaveSynthSpecialistRaw(runPath, specialistKey, text);
+        var retryResponse = await agent.RunAsync($"{JsonStageRunner.JsonRetryPrompt}\n\nOriginal response:\n{text}");
+        var retryText = retryResponse.Text ?? "";
+        result = JsonHelper.TryDeserialize<SpecialistSynthOutput>(retryText);
+        if (result == null)
+        {
+            onEvent?.Invoke(new JsonStageEvent("json_parse_failure", "Synthesizer", agentName, "Retry parse failed", null));
+            RunPersistence.SaveSynthSpecialistRaw(runPath, specialistKey, retryText);
+            throw new InvalidOperationException($"{agentName} produced invalid JSON after retry. Raw output saved to artifacts/synth/specialists/{specialistKey}.raw.txt");
+        }
+        onEvent?.Invoke(new JsonStageEvent("stage_end", "Synthesizer", agentName, null, sw.ElapsedMilliseconds));
+        RunPersistence.SaveSynthSpecialistOutput(runPath, specialistKey, result);
+        return result;
     }
 
     private static async Task<ProposedDesign> RunSynthesisWithVariantsAsync(

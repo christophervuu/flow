@@ -37,12 +37,19 @@ static string BuildPromptFromContext(string prompt, CreateRunContext? context)
     return string.Join("\n\n", parts);
 }
 
-static RunEnvelope ToEnvelope(string runId, string runPath, RunState state, ClarifierOutput? clarifier, string? designDocMarkdown)
+static RunEnvelope ToEnvelope(string runId, string runPath, RunState state, List<Question> blockingQuestions, List<Question> nonBlockingQuestions, string? designDocMarkdown)
+{
+    var blocking = blockingQuestions.Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+    var nonBlocking = nonBlockingQuestions.Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+    return new RunEnvelope(runId, state.Status, runPath, blocking, nonBlocking, designDocMarkdown);
+}
+
+static (List<Question> Blocking, List<Question> NonBlocking) GetQuestionsFromClarifier(ClarifierOutput? clarifier)
 {
     var questions = clarifier?.Questions ?? [];
-    var blocking = questions.Where(q => q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
-    var nonBlocking = questions.Where(q => !q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
-    return new RunEnvelope(runId, state.Status, runPath, blocking, nonBlocking, designDocMarkdown);
+    return (
+        questions.Where(q => q.Blocking).ToList(),
+        questions.Where(q => !q.Blocking).ToList());
 }
 
 app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequest req) =>
@@ -77,11 +84,29 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
 
     RunPersistence.SaveClarifier(runPath, result.Output);
 
-    if (result.HasBlockingQuestions)
+    if (result.HasBlockingQuestions && !req.AllowAssumptions)
     {
         state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
-        return Results.Json(ToEnvelope(runId, runPath, state, result.Output, null));
+        var (blocking, nonBlocking) = GetQuestionsFromClarifier(result.Output);
+        return Results.Json(ToEnvelope(runId, runPath, state, blocking, nonBlocking, null));
+    }
+
+    if (result.HasBlockingQuestions && req.AllowAssumptions)
+    {
+        var (blocking, _) = GetQuestionsFromClarifier(result.Output);
+        try
+        {
+            await PipelineRunner.RunAssumptionBuilderAsync(runPath, blocking);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 500);
+        }
+        catch (Azure.RequestFailedException ex)
+        {
+            return Results.Problem($"Model call failed: {ex.Message}", statusCode: 502);
+        }
     }
 
     var draft = result.Output.ClarifiedSpecDraft
@@ -89,12 +114,23 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
     var clarifiedSpec = ClarifiedSpecHelper.CreateFromDraft(draft, new Dictionary<string, string>());
     RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
 
+    var options = new PipelineOptions(SynthSpecialists: req.SynthSpecialists, AllowAssumptions: req.AllowAssumptions);
     try
     {
-        var (_, _, _, published) = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec);
+        var pipelineResult = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, answers: null, options);
+        if (pipelineResult is PipelineAwaitingSynthQuestions awaiting)
+        {
+            state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
+            RunPersistence.SaveState(runPath, state);
+            var blocking = awaiting.Questions.Where(q => q.Blocking).ToList();
+            var nonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
+            return Results.Json(ToEnvelope(runId, runPath, state, blocking, nonBlocking, null));
+        }
+        var completed = (PipelineCompleted)pipelineResult;
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
-        return Results.Json(ToEnvelope(runId, runPath, state, result.Output, published.DesignDocMarkdown));
+        var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(result.Output);
+        return Results.Json(ToEnvelope(runId, runPath, state, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
     }
     catch (InvalidOperationException ex)
     {
@@ -144,12 +180,29 @@ app.MapPost("/api/design/runs/{runId}/answers", async (string runId, [FromBody] 
     var clarifiedSpec = ClarifiedSpecHelper.CreateFromDraft(draft, req.Answers);
     RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
 
+    var selection = RunPersistence.LoadSynthSelection(runPath);
+    var allowAssumptions = req.AllowAssumptions ?? selection?.AllowAssumptions ?? false;
+    var synthSpecialists = req.SynthSpecialists ?? selection?.SynthSpecialists;
+    if (synthSpecialists is { Count: > 0 })
+        RunPersistence.SaveSynthSelection(runPath, new SynthSelection(synthSpecialists, allowAssumptions));
+    var options = new PipelineOptions(SynthSpecialists: synthSpecialists, AllowAssumptions: allowAssumptions);
+
     try
     {
-        var (_, _, _, published) = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, req.Answers);
+        var pipelineResult = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, req.Answers, options);
+        if (pipelineResult is PipelineAwaitingSynthQuestions awaiting)
+        {
+            state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
+            RunPersistence.SaveState(runPath, state);
+            var awaitingBlocking = awaiting.Questions.Where(q => q.Blocking).ToList();
+            var awaitingNonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
+            return Results.Json(ToEnvelope(runId, runPath, state, awaitingBlocking, awaitingNonBlocking, null));
+        }
+        var completed = (PipelineCompleted)pipelineResult;
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
-        return Results.Json(ToEnvelope(runId, runPath, state, clarifierOutput, published.DesignDocMarkdown));
+        var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(clarifierOutput);
+        return Results.Json(ToEnvelope(runId, runPath, state, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
     }
     catch (InvalidOperationException ex)
     {
@@ -190,18 +243,46 @@ app.MapGet("/api/design/runs/{runId}", (string runId) =>
     var hasDesignDoc = RunPersistence.GetDesignMarkdownPath(runPath) != null;
     List<QuestionDto>? blockingQuestions = null;
     List<QuestionDto>? nonBlockingQuestions = null;
+    int? remainingOpenQuestionsCount = null;
+    int? assumptionsCount = null;
+
     if (state.Status == "AwaitingClarifications")
     {
         try
         {
-            var clarifier = RunPersistence.LoadClarifier(runPath);
-            var questions = clarifier.Questions ?? [];
-            blockingQuestions = questions.Where(q => q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
-            nonBlockingQuestions = questions.Where(q => !q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+            var synthQuestions = RunPersistence.LoadSynthQuestions(runPath);
+            if (synthQuestions is { Count: > 0 })
+            {
+                blockingQuestions = synthQuestions.Where(q => q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+                nonBlockingQuestions = synthQuestions.Where(q => !q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+            }
+            else
+            {
+                var clarifier = RunPersistence.LoadClarifier(runPath);
+                var questions = clarifier.Questions ?? [];
+                blockingQuestions = questions.Where(q => q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+                nonBlockingQuestions = questions.Where(q => !q.Blocking).Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
+            }
         }
         catch { /* optional for metadata */ }
     }
-    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, blockingQuestions, nonBlockingQuestions);
+    else if (state.Status == "Completed")
+    {
+        try
+        {
+            var published = RunPersistence.LoadPublishedPackage(runPath);
+            remainingOpenQuestionsCount = published?.RemainingOpenQuestions?.Count;
+        }
+        catch { /* optional */ }
+        try
+        {
+            var assumptions = RunPersistence.LoadSynthAssumptions(runPath);
+            assumptionsCount = assumptions?.Count;
+        }
+        catch { /* optional */ }
+    }
+
+    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, blockingQuestions, nonBlockingQuestions, remainingOpenQuestionsCount, assumptionsCount);
     return Results.Json(meta);
 });
 

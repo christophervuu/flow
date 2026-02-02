@@ -4,6 +4,9 @@ import { Toaster } from "@/components/ui/sonner"
 import { RecentRuns } from "@/components/RecentRuns"
 import { ComposePage } from "@/pages/ComposePage"
 import { RunPage } from "@/pages/RunPage"
+import { TestModeProvider, useTestMode } from "@/contexts/TestModeContext"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,6 +18,7 @@ const queryClient = new QueryClient({
 })
 
 function Layout({ children }: { children: React.ReactNode }) {
+  const { testMode, setTestMode } = useTestMode()
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
@@ -34,6 +38,23 @@ function Layout({ children }: { children: React.ReactNode }) {
             </Link>
             <RecentRuns />
           </nav>
+          <div className="ml-auto flex items-center gap-2">
+            {testMode && (
+              <span className="text-xs font-medium rounded-full bg-muted px-2 py-0.5 text-muted-foreground">
+                Test
+              </span>
+            )}
+            <div className="flex items-center gap-2">
+              <Switch
+                id="test-mode"
+                checked={testMode}
+                onCheckedChange={setTestMode}
+              />
+              <Label htmlFor="test-mode" className="text-sm cursor-pointer">
+                Test mode
+              </Label>
+            </div>
+          </div>
         </div>
       </header>
       <main className="container mx-auto px-4 py-6">{children}</main>
@@ -44,14 +65,16 @@ function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<ComposePage />} />
-            <Route path="/runs/:runId" element={<RunPage />} />
-          </Routes>
-        </Layout>
-      </BrowserRouter>
+      <TestModeProvider>
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<ComposePage />} />
+              <Route path="/runs/:runId" element={<RunPage />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+      </TestModeProvider>
       <Toaster position="top-right" richColors />
     </QueryClientProvider>
   )

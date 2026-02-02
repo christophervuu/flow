@@ -31,6 +31,8 @@ export interface RunMetadata {
   artifactPaths: ArtifactPathsDto
   blockingQuestions?: QuestionDto[] | null
   nonBlockingQuestions?: QuestionDto[] | null
+  remainingOpenQuestionsCount?: number | null
+  assumptionsCount?: number | null
 }
 
 export interface CreateRunRequest {
@@ -44,4 +46,6 @@ export interface CreateRunRequest {
 
 export interface SubmitAnswersRequest {
   answers: Record<string, string>
+  allowAssumptions?: boolean
+  synthSpecialists?: string | string[] | null
 }

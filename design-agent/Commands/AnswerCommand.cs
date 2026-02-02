@@ -76,18 +76,41 @@ public static class AnswerCommand
         var clarifiedSpec = design_agent.Services.ClarifiedSpecHelper.CreateFromDraft(draft!, answers);
         design_agent.Services.RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
 
-        var (_, _, _, published) = await design_agent.Services.PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, answers, pipelineOptions);
+        var pipelineResult = await design_agent.Services.PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, answers, pipelineOptions);
 
+        if (pipelineResult is design_agent.Models.PipelineAwaitingSynthQuestions awaiting)
+        {
+            state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
+            design_agent.Services.RunPersistence.SaveState(runPath, state);
+            var awaitingBlocking = awaiting.Questions.Where(q => q.Blocking).ToList();
+            var awaitingNonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
+            if (json)
+            {
+                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = awaitingBlocking, nonBlockingQuestions = awaitingNonBlocking, designDocMarkdown = (string?)null };
+                Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
+            }
+            else
+            {
+                Console.WriteLine("Awaiting clarifications from specialist synthesis. Answer via: flow answer <runId>");
+                foreach (var q in awaitingBlocking)
+                    Console.WriteLine($"  [{q.Id}] {q.Text} (blocking)");
+                foreach (var q in awaitingNonBlocking)
+                    Console.WriteLine($"  [{q.Id}] {q.Text}");
+            }
+            return;
+        }
+
+        var completed = (design_agent.Models.PipelineCompleted)pipelineResult;
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         design_agent.Services.RunPersistence.SaveState(runPath, state);
 
         if (json)
         {
-            var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = published.DesignDocMarkdown };
+            var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = completed.Published.DesignDocMarkdown };
             Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             return;
         }
-        Console.WriteLine(published.DesignDocMarkdown ?? "");
+        Console.WriteLine(completed.Published.DesignDocMarkdown ?? "");
         Console.WriteLine();
         Console.WriteLine($"--- Run ID: {runId} | Design doc: {runPath}/published/DESIGN.md ---");
     }

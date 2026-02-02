@@ -6,7 +6,10 @@ namespace design_agent.Models;
 public record PipelineOptions(
     bool DeepCritique = false,
     int Variants = 1,
-    bool Trace = false)
+    bool Trace = false,
+    IReadOnlyList<string>? SynthSpecialists = null,
+    bool AllowAssumptions = false,
+    bool RunConsistencyCheck = false)
 {
     public const int MinVariants = 1;
     public const int MaxVariants = 5;

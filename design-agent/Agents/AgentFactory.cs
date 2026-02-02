@@ -38,4 +38,19 @@ public static class AgentFactory
 
     public static ChatClientAgent CreateChallengerPersonaAgent(IChatClient chatClient, string personaName, string instructions, IReadOnlyList<AIFunction>? tools = null) =>
         CreateAgent(chatClient, instructions, $"Challenger_{personaName}", tools);
+
+    public static ChatClientAgent CreateSpecialistSynthesizerAgent(IChatClient chatClient, string specialistKey, IReadOnlyList<AIFunction>? tools = null)
+    {
+        var instructions = SpecialistSynthesizerAgents.GetInstructions(specialistKey);
+        return CreateAgent(chatClient, instructions, $"Synth_{specialistKey}", tools);
+    }
+
+    public static ChatClientAgent CreateMergerAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, MergerAgent.Instructions, "Merger", tools);
+
+    public static ChatClientAgent CreateAssumptionBuilderAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, AssumptionBuilderAgent.Instructions, "AssumptionBuilder", tools);
+
+    public static ChatClientAgent CreateConsistencyCheckerAgent(IChatClient chatClient, IReadOnlyList<AIFunction>? tools = null) =>
+        CreateAgent(chatClient, ConsistencyCheckerAgent.Instructions, "ConsistencyChecker", tools);
 }

@@ -10,7 +10,9 @@ public record RunMetadata(
     [property: JsonPropertyName("hasDesignDoc")] bool HasDesignDoc,
     [property: JsonPropertyName("artifactPaths")] ArtifactPathsDto ArtifactPaths,
     [property: JsonPropertyName("blockingQuestions")] List<QuestionDto>? BlockingQuestions = null,
-    [property: JsonPropertyName("nonBlockingQuestions")] List<QuestionDto>? NonBlockingQuestions = null);
+    [property: JsonPropertyName("nonBlockingQuestions")] List<QuestionDto>? NonBlockingQuestions = null,
+    [property: JsonPropertyName("remainingOpenQuestionsCount")] int? RemainingOpenQuestionsCount = null,
+    [property: JsonPropertyName("assumptionsCount")] int? AssumptionsCount = null);
 
 public record ArtifactPathsDto(
     [property: JsonPropertyName("state")] string State,

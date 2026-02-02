@@ -4,6 +4,12 @@ import type {
   RunMetadata,
   SubmitAnswersRequest,
 } from "@/types"
+import { getTestMode } from "@/lib/testMode"
+import {
+  mockRunEnvelope,
+  mockRunMetadata,
+  mockDesignMarkdown,
+} from "@/lib/apiMocks"
 
 const API_BASE = "/api"
 
@@ -26,6 +32,9 @@ async function parseErrorResponse(res: Response): Promise<string> {
 }
 
 export async function createRun(req: CreateRunRequest): Promise<RunEnvelope> {
+  if (getTestMode()) {
+    return Promise.resolve(mockRunEnvelope())
+  }
   const res = await fetch(`${API_BASE}/design/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -41,6 +50,9 @@ export async function submitAnswers(
   runId: string,
   req: SubmitAnswersRequest
 ): Promise<RunEnvelope> {
+  if (getTestMode()) {
+    return Promise.resolve(mockRunEnvelope(runId))
+  }
   const res = await fetch(`${API_BASE}/design/runs/${runId}/answers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -53,6 +65,9 @@ export async function submitAnswers(
 }
 
 export async function getRun(runId: string): Promise<RunMetadata> {
+  if (getTestMode()) {
+    return Promise.resolve(mockRunMetadata(runId))
+  }
   const res = await fetch(`${API_BASE}/design/runs/${runId}`)
   if (!res.ok) {
     throw new Error(await parseErrorResponse(res))
@@ -61,6 +76,9 @@ export async function getRun(runId: string): Promise<RunMetadata> {
 }
 
 export async function getDesign(runId: string): Promise<string> {
+  if (getTestMode()) {
+    return Promise.resolve(mockDesignMarkdown())
+  }
   const res = await fetch(`${API_BASE}/design/runs/${runId}/design`)
   if (!res.ok) {
     throw new Error(await parseErrorResponse(res))

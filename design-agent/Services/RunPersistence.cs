@@ -55,8 +55,59 @@ public static class RunPersistence
         AgentCore.RunPersistence.SavePublishedText(runPath, "DESIGN.md", package.DesignDocMarkdown ?? "");
     }
 
+    public static PublishedPackage? LoadPublishedPackage(string runPath)
+    {
+        var path = Path.Combine(GetArtifactsDir(runPath), "publishedPackage.json");
+        if (!File.Exists(path)) return null;
+        return AgentCore.RunPersistence.LoadArtifactJson<PublishedPackage>(runPath, "publishedPackage.json");
+    }
+
     public static void SaveRawAgentOutput(string runPath, string agentName, string rawOutput) =>
         AgentCore.RunPersistence.SaveArtifactText(runPath, $"{agentName}.raw.txt", rawOutput);
+
+    // --- Synth artifacts (artifacts/synth/...) ---
+
+    public static void SaveSynthSelection(string runPath, SynthSelection selection) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "synth/selection.json", selection);
+
+    public static SynthSelection? LoadSynthSelection(string runPath)
+    {
+        var path = Path.Combine(GetArtifactsDir(runPath), "synth", "selection.json");
+        if (!File.Exists(path)) return null;
+        return AgentCore.RunPersistence.LoadArtifactJson<SynthSelection>(runPath, "synth/selection.json");
+    }
+
+    public static void SaveSynthSpecialistOutput<T>(string runPath, string specialistKey, T output) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, $"synth/specialists/{specialistKey}.json", output);
+
+    public static void SaveSynthSpecialistRaw(string runPath, string specialistKey, string rawText) =>
+        AgentCore.RunPersistence.SaveArtifactText(runPath, $"synth/specialists/{specialistKey}.raw.txt", rawText);
+
+    public static void SaveSynthQuestions(string runPath, List<Question> questions) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "synth/questions.json", questions);
+
+    public static List<Question>? LoadSynthQuestions(string runPath)
+    {
+        var path = Path.Combine(GetArtifactsDir(runPath), "synth", "questions.json");
+        if (!File.Exists(path)) return null;
+        return AgentCore.RunPersistence.LoadArtifactJson<List<Question>>(runPath, "synth/questions.json");
+    }
+
+    public static void SaveSynthAssumptions(string runPath, List<AssumptionRecord> assumptions) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "synth/assumptions.json", assumptions);
+
+    public static List<AssumptionRecord>? LoadSynthAssumptions(string runPath)
+    {
+        var path = Path.Combine(GetArtifactsDir(runPath), "synth", "assumptions.json");
+        if (!File.Exists(path)) return null;
+        return AgentCore.RunPersistence.LoadArtifactJson<List<AssumptionRecord>>(runPath, "synth/assumptions.json");
+    }
+
+    public static void SaveMergedPartial(string runPath, object merged) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "synth/mergedPartial.json", merged);
+
+    public static void SaveConsistencyReport(string runPath, ConsistencyReport report) =>
+        AgentCore.RunPersistence.SaveArtifactJson(runPath, "synth/consistencyReport.json", report);
 
     public static string? GetDesignMarkdownPath(string runPath)
     {
