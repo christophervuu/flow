@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { FormEvent } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -15,7 +15,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { ContextAccordion } from "@/components/ContextAccordion"
 import { ExecutionDAG } from "@/components/ExecutionDAG"
 import { QuestionSection } from "@/components/QuestionSection"
-import { MarkdownViewer } from "@/components/MarkdownViewer"
+import {
+  AgentResponseMessage,
+  type AgentResponseMessageItem,
+} from "@/components/AgentResponseMessage"
 import { cn } from "@/lib/utils"
 import {
   SECTION_OPTIONS,
@@ -40,6 +43,8 @@ export function ComposePage() {
   const [initialDesignMarkdown, setInitialDesignMarkdown] = useState<string | null>(null)
   const [submittedPrompt, setSubmittedPrompt] = useState("")
   const [submittedTitle, setSubmittedTitle] = useState("")
+  const [createRunError, setCreateRunError] = useState<string | null>(null)
+  const [submitAnswersError, setSubmitAnswersError] = useState<string | null>(null)
 
   // Non-blocking run creation mutation
   const createRunMutation = useMutation({
@@ -51,6 +56,7 @@ export function ComposePage() {
       allowAssumptions?: boolean
     }) => createRun(params),
     onSuccess: (envelope) => {
+      setCreateRunError(null)
       addRecentRun(envelope.runId, submittedTitle)
       setRunId(envelope.runId)
       if (envelope.designDocMarkdown) {
@@ -58,8 +64,7 @@ export function ComposePage() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to start run")
-      setRunId(null) // Go back to form
+      setCreateRunError(err instanceof Error ? err.message : "Failed to start run")
     },
   })
 
@@ -93,11 +98,12 @@ export function ComposePage() {
         ...(payload.allowAssumptions != null ? { allowAssumptions: payload.allowAssumptions } : {}),
       }),
     onSuccess: () => {
+      setSubmitAnswersError(null)
       queryClient.invalidateQueries({ queryKey: ["run", runId] })
       toast.success("Answers submitted")
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to submit")
+      setSubmitAnswersError(err instanceof Error ? err.message : "Failed to submit")
     },
   })
 
@@ -147,6 +153,8 @@ export function ComposePage() {
   function handleStartNewRun() {
     setRunId(null)
     setInitialDesignMarkdown(null)
+    setCreateRunError(null)
+    setSubmitAnswersError(null)
   }
 
   function handleClarificationsSubmit(e: FormEvent) {
@@ -171,6 +179,97 @@ export function ComposePage() {
 
   const status = meta?.status
   const content = (initialDesignMarkdown ?? designMarkdown ?? "").trim()
+
+  const agentMessages = useMemo((): AgentResponseMessageItem[] => {
+    if (isPending) {
+      const messages: AgentResponseMessageItem[] = [
+        { id: "creating", type: "waiting", content: "Creating run…" },
+      ]
+      if (createRunError) {
+        messages.push({
+          id: "create-error",
+          type: "error",
+          content: createRunError,
+        })
+      }
+      return messages
+    }
+    if (isLoading) {
+      return [{ id: "loading-run", type: "waiting", content: "Loading run…" }]
+    }
+    if (error) {
+      return [
+        {
+          id: "run-error",
+          type: "error",
+          content: error instanceof Error ? error.message : "Failed to load run",
+        },
+      ]
+    }
+    if (!meta) return []
+
+    if (status === "Running") {
+      return [
+        {
+          id: "waiting-exec",
+          type: "waiting",
+          content: "Waiting for execution to complete…",
+        },
+      ]
+    }
+    if (status === "AwaitingClarifications") {
+      const list: AgentResponseMessageItem[] = [
+        {
+          id: "clarifications",
+          type: "waiting",
+          content: "Clarifier has requested some clarifications.",
+        },
+      ]
+      if (submitAnswersError) {
+        list.push({
+          id: "submit-error",
+          type: "error",
+          content: submitAnswersError,
+        })
+      }
+      return list
+    }
+    if (status === "Completed") {
+      if (content) {
+        return [
+          {
+            id: "publisher",
+            type: "agent",
+            content,
+            agentName: "Publisher",
+          },
+        ]
+      }
+      return [
+        {
+          id: "loading-design",
+          type: "waiting",
+          content: "Loading design doc…",
+        },
+      ]
+    }
+    return [
+      {
+        id: "unknown-status",
+        type: "waiting",
+        content: `Unknown status: ${status}. Try refreshing.`,
+      },
+    ]
+  }, [
+    isPending,
+    createRunError,
+    isLoading,
+    error,
+    meta,
+    status,
+    content,
+    submitAnswersError,
+  ])
 
   if (!runId) {
     return (
@@ -343,36 +442,7 @@ export function ComposePage() {
     )
   }
 
-  // Don't show the old loading spinner - we now show inline loading in the DAG
-  // Only show loading if we have a real runId (not pending) and are still loading
-  if (isLoading && !isPending) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[300px] gap-4">
-        <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-        <p className="text-muted-foreground">Loading run…</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-2xl mx-auto text-center py-12">
-        <p className="text-destructive mb-4">
-          {error instanceof Error ? error.message : "Failed to load run"}
-        </p>
-        <div className="flex gap-2 justify-center">
-          <Button variant="outline" onClick={() => refetch()}>
-            Retry
-          </Button>
-          <Button onClick={handleStartNewRun}>Start new run</Button>
-        </div>
-      </div>
-    )
-  }
-
-  // If we're pending or have meta, show the two-column layout
-  if (!meta && !isPending) return null
-
+  // Two-column layout whenever runId is set (including "pending")
   return (
     <div
       className={cn(
@@ -436,119 +506,86 @@ export function ComposePage() {
         </div>
       </div>
 
-      {/* Right column: Agent Response (full height) */}
+      {/* Right column: Agent Response (chat messages) */}
       <div
         className={cn(
           "flex flex-col min-h-0 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] p-8 shadow-[var(--shadow-card)] retro-card-outline flex-1"
         )}
       >
-        {(status === "Running" || isPending) && (
-          <div className="flex flex-col flex-1 min-h-0 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
-            <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
-              <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
-                aria-hidden
-              >
-                📝
-              </div>
-              <h4 className="font-semibold">Agent Response</h4>
+        <div className="flex flex-col flex-1 min-h-0 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
+          <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
+              aria-hidden
+            >
+              📝
             </div>
-            <div className="flex-1 min-h-0 overflow-auto">
-              <p className="italic text-[var(--muted-foreground)]">
-                Waiting for execution to complete…
-              </p>
-            </div>
+            <h4 className="font-semibold">Agent Response</h4>
           </div>
-        )}
-
-        {status === "AwaitingClarifications" && !isPending && (
-          <div className="flex flex-col flex-1 min-h-0 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
-            <div className="flex items-center gap-3 mb-6">
-              <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-blue)] text-xl"
-                aria-hidden
-              >
-                ❓
-              </div>
-              <h3 className="text-xl font-semibold">Clarifications</h3>
-            </div>
-            <div className="flex-1 min-h-0 overflow-auto">
-            <form onSubmit={handleClarificationsSubmit} className="space-y-6">
-              <QuestionSection
-                blocking={meta?.blockingQuestions ?? []}
-                nonBlocking={meta?.nonBlockingQuestions ?? []}
-                answers={answers}
-                onChange={setAnswers}
-                disabled={submitAnswersMutation.isPending}
+          <div className="flex-1 min-h-0 overflow-auto space-y-4">
+            {agentMessages.map((msg) => (
+              <AgentResponseMessage
+                key={msg.id}
+                message={msg}
+                onRetry={
+                  msg.id === "run-error" ? () => refetch() : undefined
+                }
               />
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="allow-assumptions-clarify"
-                  checked={allowAssumptions}
-                  onCheckedChange={(checked) =>
-                    setAllowAssumptions(checked === true)
-                  }
-                  disabled={submitAnswersMutation.isPending}
-                />
-                <Label
-                  htmlFor="allow-assumptions-clarify"
-                  className="text-sm font-medium cursor-pointer"
-                >
-                  Allow assumptions for unanswered questions
-                </Label>
-              </div>
-              <Button
-                type="submit"
-                disabled={submitAnswersMutation.isPending}
-                className={cn(
-                  theme === "retro" &&
-                    "bg-[var(--accent-yellow)] text-[var(--foreground)] hover:bg-[#ffef9f]"
-                )}
-              >
-                {submitAnswersMutation.isPending ? "Submitting…" : "Submit answers"}
-              </Button>
-            </form>
-            </div>
+            ))}
           </div>
-        )}
 
-        {status === "Completed" && !isPending && (
-          <div className="flex flex-col flex-1 min-h-0 rounded-[var(--border-radius-card)] border-2 border-[var(--border)] bg-[var(--card)] p-6 retro-card-outline">
-            <div className="flex items-center gap-3 mb-4 pb-4 border-b-2 border-dashed border-[var(--muted)]">
-              {theme === "retro" && (
+          {status === "AwaitingClarifications" && !isPending && meta && (
+            <div className="mt-6 pt-6 border-t-2 border-dashed border-[var(--muted)]">
+              <div className="flex items-center gap-3 mb-4">
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-[var(--border)] bg-[var(--accent-green)] text-lg"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-blue)] text-xl"
                   aria-hidden
                 >
-                  📝
+                  ❓
                 </div>
-              )}
-              <h3 className="font-semibold">Agent Response</h3>
-            </div>
-            {content ? (
-              <div className="flex-1 min-h-0 overflow-auto">
-                <MarkdownViewer content={content} />
+                <h3 className="text-xl font-semibold">Clarifications</h3>
               </div>
-            ) : (
-              <div className="flex-1 min-h-0 overflow-auto">
-                <p className="italic text-[var(--muted-foreground)]">
-                  Loading design doc…
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {status && !isPending && !["Running", "AwaitingClarifications", "Completed"].includes(status) && (
-          <div className="flex flex-col flex-1 min-h-0 overflow-auto">
-            <div className="text-center py-8">
-              <p className="text-muted-foreground mb-4">Unknown status: {status}</p>
-              <Button variant="outline" onClick={() => refetch()}>
-                Refresh
-              </Button>
+              <form onSubmit={handleClarificationsSubmit} className="space-y-6">
+                <QuestionSection
+                  blocking={meta.blockingQuestions ?? []}
+                  nonBlocking={meta.nonBlockingQuestions ?? []}
+                  answers={answers}
+                  onChange={(newAnswers) => {
+                    setAnswers(newAnswers)
+                    setSubmitAnswersError(null)
+                  }}
+                  disabled={submitAnswersMutation.isPending}
+                />
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="allow-assumptions-clarify"
+                    checked={allowAssumptions}
+                    onCheckedChange={(checked) =>
+                      setAllowAssumptions(checked === true)
+                    }
+                    disabled={submitAnswersMutation.isPending}
+                  />
+                  <Label
+                    htmlFor="allow-assumptions-clarify"
+                    className="text-sm font-medium cursor-pointer"
+                  >
+                    Allow assumptions for unanswered questions
+                  </Label>
+                </div>
+                <Button
+                  type="submit"
+                  disabled={submitAnswersMutation.isPending}
+                  className={cn(
+                    theme === "retro" &&
+                      "bg-[var(--accent-yellow)] text-[var(--foreground)] hover:bg-[#ffef9f]"
+                  )}
+                >
+                  {submitAnswersMutation.isPending ? "Submitting…" : "Submit answers"}
+                </Button>
+              </form>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

@@ -26,11 +26,7 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header
-        className={cn(
-          "border-b-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline"
-        )}
-      >
+      <header className="bg-background">
         <div className="container mx-auto flex items-center gap-6 px-4 py-3">
           <Link to="/" className="flex items-center gap-3 hover:opacity-80">
             <div
