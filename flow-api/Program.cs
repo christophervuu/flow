@@ -1,6 +1,7 @@
 using design_agent.Models;
 using design_agent.Services;
 using flow_api.Dto;
+using flow_api.Services;
 using Microsoft.AspNetCore.Mvc;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -12,6 +13,8 @@ builder.WebHost.ConfigureKestrel(options =>
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSingleton<IBackgroundPipelineQueue, BackgroundPipelineQueue>();
+builder.Services.AddHostedService<BackgroundPipelineService>();
 
 var app = builder.Build();
 
@@ -137,6 +140,13 @@ static ExecutionStatusDto BuildExecutionStatus(string runDir, string runId, stri
     var allKnown = new HashSet<string> { "Clarifier", "Synthesizer", "Challenger", "Optimizer", "Publisher", "Merger", "DesignJudge", "CritiqueJudge" };
     foreach (var a in completed) allKnown.Add(a);
     foreach (var a in active) allKnown.Add(a);
+    var selection = RunPersistence.LoadSynthSelection(runPath);
+    if (selection?.SynthSpecialists is { Count: > 0 } specialists)
+    {
+        foreach (var key in specialists)
+            allKnown.Add($"Synth_{key}");
+        allKnown.Add("Merger");
+    }
     var pending = allKnown.Except(completed).Except(active).OrderBy(x => x).ToList();
 
     var total = Math.Max(completed.Count + active.Count + pending.Count, 1);
@@ -153,7 +163,7 @@ static ExecutionStatusDto BuildExecutionStatus(string runDir, string runId, stri
         new ProgressDto(current, total));
 }
 
-app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequest req) =>
+app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequest req, IBackgroundPipelineQueue queue) =>
 {
     if (string.IsNullOrWhiteSpace(req?.Title) || string.IsNullOrWhiteSpace(req?.Prompt))
         return Results.Problem("title and prompt are required", statusCode: 400);
@@ -179,82 +189,19 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
     RunPersistence.SaveState(runPath, state);
     RunPersistence.SaveInput(runPath, new RunInput(req.Title, prompt, normalizedSections.ToList()));
 
-    ClarifierResult result;
-    try
+    await queue.EnqueueAsync(new PipelineWorkItem
     {
-        result = await PipelineRunner.RunClarifierAsync(runPath, req.Title, prompt);
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
-    catch (Azure.RequestFailedException ex)
-    {
-        return Results.Problem($"Model call failed: {ex.Message}", statusCode: 502);
-    }
+        RunPath = runPath,
+        RunId = runId,
+        IsRunClarifier = true,
+        AllowAssumptions = req.AllowAssumptions,
+        SynthSpecialists = req.SynthSpecialists,
+    });
 
-    RunPersistence.SaveClarifier(runPath, result.Output);
-
-    if (result.HasBlockingQuestions && !req.AllowAssumptions)
-    {
-        state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
-        RunPersistence.SaveState(runPath, state);
-        var (blocking, nonBlocking) = GetQuestionsFromClarifier(result.Output);
-        return Results.Json(ToEnvelope(runId, runPath, state, normalizedSections, blocking, nonBlocking, null));
-    }
-
-    if (result.HasBlockingQuestions && req.AllowAssumptions)
-    {
-        var (blocking, _) = GetQuestionsFromClarifier(result.Output);
-        try
-        {
-            await PipelineRunner.RunAssumptionBuilderAsync(runPath, blocking);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Results.Problem(ex.Message, statusCode: 500);
-        }
-        catch (Azure.RequestFailedException ex)
-        {
-            return Results.Problem($"Model call failed: {ex.Message}", statusCode: 502);
-        }
-    }
-
-    var draft = result.Output.ClarifiedSpecDraft
-        ?? throw new InvalidOperationException("Clarifier produced no clarified_spec_draft.");
-    var clarifiedSpec = ClarifiedSpecHelper.CreateFromDraft(draft, new Dictionary<string, string>());
-    RunPersistence.SaveClarifiedSpec(runPath, clarifiedSpec);
-
-    var options = new PipelineOptions(SynthSpecialists: req.SynthSpecialists, AllowAssumptions: req.AllowAssumptions);
-    try
-    {
-        var pipelineResult = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, answers: null, options);
-        if (pipelineResult is PipelineAwaitingSynthQuestions awaiting)
-        {
-            state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
-            RunPersistence.SaveState(runPath, state);
-            var blocking = awaiting.Questions.Where(q => q.Blocking).ToList();
-            var nonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
-            var includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
-            return Results.Json(ToEnvelope(runId, runPath, state, includedSections, blocking, nonBlocking, null));
-        }
-        var completed = (PipelineCompleted)pipelineResult;
-        state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
-        RunPersistence.SaveState(runPath, state);
-        var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(result.Output);
-        return Results.Json(ToEnvelope(runId, runPath, state, completed.IncludedSections, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
-    catch (Azure.RequestFailedException ex)
-    {
-        return Results.Problem($"Model call failed: {ex.Message}", statusCode: 502);
-    }
+    return Results.Json(ToEnvelope(runId, runPath, state, normalizedSections, [], [], null));
 });
 
-app.MapPost("/api/design/runs/{runId}/answers", async (string runId, [FromBody] SubmitAnswersRequest? req) =>
+app.MapPost("/api/design/runs/{runId}/answers", async (string runId, [FromBody] SubmitAnswersRequest? req, IBackgroundPipelineQueue queue) =>
 {
     if (req?.Answers == null)
         return Results.Problem("answers object is required", statusCode: 400);
@@ -297,34 +244,21 @@ app.MapPost("/api/design/runs/{runId}/answers", async (string runId, [FromBody] 
     var synthSpecialists = req.SynthSpecialists ?? selection?.SynthSpecialists;
     if (synthSpecialists is { Count: > 0 })
         RunPersistence.SaveSynthSelection(runPath, new SynthSelection(synthSpecialists, allowAssumptions));
-    var options = new PipelineOptions(SynthSpecialists: synthSpecialists, AllowAssumptions: allowAssumptions);
 
-    try
+    state = state with { Status = "Running", UpdatedAt = DateTime.UtcNow.ToString("O") };
+    RunPersistence.SaveState(runPath, state);
+
+    await queue.EnqueueAsync(new PipelineWorkItem
     {
-        var pipelineResult = await PipelineRunner.RunRemainingPipelineAsync(runPath, clarifiedSpec, req.Answers, options);
-        if (pipelineResult is PipelineAwaitingSynthQuestions awaiting)
-        {
-            state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
-            RunPersistence.SaveState(runPath, state);
-            var awaitingBlocking = awaiting.Questions.Where(q => q.Blocking).ToList();
-            var awaitingNonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
-            var includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
-            return Results.Json(ToEnvelope(runId, runPath, state, includedSections, awaitingBlocking, awaitingNonBlocking, null));
-        }
-        var completed = (PipelineCompleted)pipelineResult;
-        state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
-        RunPersistence.SaveState(runPath, state);
-        var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(clarifierOutput);
-        return Results.Json(ToEnvelope(runId, runPath, state, completed.IncludedSections, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
-    }
-    catch (InvalidOperationException ex)
-    {
-        return Results.Problem(ex.Message, statusCode: 500);
-    }
-    catch (Azure.RequestFailedException ex)
-    {
-        return Results.Problem($"Model call failed: {ex.Message}", statusCode: 502);
-    }
+        RunPath = runPath,
+        RunId = runId,
+        IsRunClarifier = false,
+        Answers = req.Answers,
+    });
+
+    var includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
+    var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(clarifierOutput);
+    return Results.Json(ToEnvelope(runId, runPath, state, includedSections, blockingQ, nonBlockingQ, null));
 });
 
 app.MapGet("/api/design/runs/{runId}", (string runId) =>
@@ -396,7 +330,7 @@ app.MapGet("/api/design/runs/{runId}", (string runId) =>
     }
 
     ExecutionStatusDto? executionStatus = null;
-    if (state.Status == "Running" || state.Status == "Completed")
+    if (state.Status == "Running" || state.Status == "Completed" || state.Status == "AwaitingClarifications")
     {
         try
         {

@@ -11,7 +11,8 @@ public static class PipelineRunner
     public static async Task<ClarifierResult> RunClarifierAsync(
         string runPath,
         string title,
-        string prompt)
+        string prompt,
+        Action<JsonStageEvent>? onEvent = null)
     {
         var chatClient = AgentFactory.CreateChatClient();
         var runTools = RunScopedTools.CreateFunctions(runPath);
@@ -28,7 +29,7 @@ public static class PipelineRunner
 
         var output = await JsonStageRunner.RunJsonStageWithRetryAsync(
             agent, fullPrompt, runPath, "Clarifier", "Clarifier",
-            s => JsonHelper.TryDeserialize<ClarifierOutput>(s));
+            s => JsonHelper.TryDeserialize<ClarifierOutput>(s), onEvent);
 
         return new ClarifierResult(output, (output.Questions ?? []).Any(q => q.Blocking));
     }
@@ -37,13 +38,18 @@ public static class PipelineRunner
         string runPath,
         ClarifiedSpec clarifiedSpec,
         IReadOnlyDictionary<string, string>? answers = null,
-        PipelineOptions? options = null)
+        PipelineOptions? options = null,
+        Action<JsonStageEvent>? onEvent = null)
     {
         options ??= new PipelineOptions();
         var opts = options with { Variants = options.VariantsClamped };
 
-        using var traceWriter = opts.Trace ? new TraceWriter(runPath) : null;
-        void OnEvent(JsonStageEvent e) => traceWriter?.Append(e);
+        using var traceWriter = (onEvent == null && opts.Trace) ? new TraceWriter(runPath) : null;
+        void OnEventLocal(JsonStageEvent e)
+        {
+            if (onEvent != null) onEvent(e);
+            else traceWriter?.Append(e);
+        }
 
         var chatClient = AgentFactory.CreateChatClient();
         var runTools = RunScopedTools.CreateFunctions(runPath);
@@ -57,13 +63,13 @@ public static class PipelineRunner
         var specialists = opts.SynthSpecialists?.Where(SpecialistSynthesizerAgents.IsKnownSpecialist).ToList();
         if (specialists is { Count: > 0 })
         {
-            var (design, awaiting) = await RunHybridSynthesisAsync(runPath, chatClient, runTools, specJson, answersText, specialists, opts.AllowAssumptions, OnEvent);
+            var (design, awaiting) = await RunHybridSynthesisAsync(runPath, chatClient, runTools, specJson, answersText, specialists, opts.AllowAssumptions, OnEventLocal);
             proposed = design;
             awaitingSynthQuestions = awaiting;
         }
         else if (opts.VariantsClamped > 1)
         {
-            proposed = await RunSynthesisWithVariantsAsync(runPath, chatClient, runTools, specJson, answersText, opts.VariantsClamped, OnEvent);
+            proposed = await RunSynthesisWithVariantsAsync(runPath, chatClient, runTools, specJson, answersText, opts.VariantsClamped, OnEventLocal);
         }
         else
         {
@@ -72,7 +78,7 @@ public static class PipelineRunner
                 synthAgent,
                 $"Clarified specification:\n{specJson}{answersText}\n\nProduce your ProposedDesign JSON.",
                 runPath, "Synthesizer", "Synthesizer",
-                s => JsonHelper.TryDeserialize<ProposedDesign>(s), OnEvent);
+                s => JsonHelper.TryDeserialize<ProposedDesign>(s), OnEventLocal);
         }
 
         if (awaitingSynthQuestions != null)
@@ -91,7 +97,7 @@ public static class PipelineRunner
                 consistencyAgent,
                 $"Proposed design:\n{proposedJson}\n\nProduce your ConsistencyReport JSON.",
                 runPath, "ConsistencyChecker", "ConsistencyChecker",
-                s => JsonHelper.TryDeserialize<ConsistencyReport>(s), OnEvent);
+                s => JsonHelper.TryDeserialize<ConsistencyReport>(s), OnEventLocal);
             if (report != null)
                 RunPersistence.SaveConsistencyReport(runPath, report);
         }
@@ -99,7 +105,7 @@ public static class PipelineRunner
         Critique critique;
         if (opts.DeepCritique)
         {
-            critique = await RunDeepCritiqueAsync(runPath, chatClient, runTools, proposedJson, OnEvent);
+            critique = await RunDeepCritiqueAsync(runPath, chatClient, runTools, proposedJson, OnEventLocal);
         }
         else
         {
@@ -108,7 +114,7 @@ public static class PipelineRunner
                 challengeAgent,
                 $"Proposed design:\n{proposedJson}\n\nProduce your Critique JSON.",
                 runPath, "Challenger", "Challenger",
-                s => JsonHelper.TryDeserialize<Critique>(s), OnEvent);
+                s => JsonHelper.TryDeserialize<Critique>(s), OnEventLocal);
         }
 
         RunPersistence.SaveCritique(runPath, critique);
@@ -119,7 +125,7 @@ public static class PipelineRunner
             optimizeAgent,
             $"Proposed design:\n{proposedJson}\n\nCritique:\n{critiqueJson}\n\nProduce your OptimizedDesign JSON.",
             runPath, "Optimizer", "Optimizer",
-            s => JsonHelper.TryDeserialize<OptimizedDesign>(s), OnEvent);
+            s => JsonHelper.TryDeserialize<OptimizedDesign>(s), OnEventLocal);
 
         RunPersistence.SaveOptimizedDesign(runPath, optimized);
         var optimizedJson = JsonSerializer.Serialize(optimized, new JsonSerializerOptions { WriteIndented = false });
@@ -162,7 +168,7 @@ public static class PipelineRunner
             Produce your PublishedPackage JSON.
             """,
             runPath, "Publisher", "Publisher",
-            s => JsonHelper.TryDeserialize<PublishedPackage>(s), OnEvent);
+            s => JsonHelper.TryDeserialize<PublishedPackage>(s), OnEventLocal);
 
         if (!includedSections.Contains("work_breakdown", StringComparer.OrdinalIgnoreCase))
         {

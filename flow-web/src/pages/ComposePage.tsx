@@ -65,6 +65,7 @@ export function ComposePage() {
     },
     onError: (err) => {
       setCreateRunError(err instanceof Error ? err.message : "Failed to start run")
+      setRunId(null)
     },
   })
 
@@ -97,6 +98,9 @@ export function ComposePage() {
         answers: payload.answers,
         ...(payload.allowAssumptions != null ? { allowAssumptions: payload.allowAssumptions } : {}),
       }),
+    onMutate: () => {
+      queryClient.invalidateQueries({ queryKey: ["run", runId] })
+    },
     onSuccess: () => {
       setSubmitAnswersError(null)
       queryClient.invalidateQueries({ queryKey: ["run", runId] })
@@ -253,6 +257,15 @@ export function ComposePage() {
         },
       ]
     }
+    if (status === "Failed") {
+      return [
+        {
+          id: "run-failed",
+          type: "error",
+          content: "The pipeline failed. You can start a new run.",
+        },
+      ]
+    }
     return [
       {
         id: "unknown-status",
@@ -302,6 +315,14 @@ export function ComposePage() {
             )}
             <h1 className="text-2xl font-semibold">New Design</h1>
           </div>
+
+          {createRunError && (
+            <div className="mb-6 rounded-[var(--border-radius-card)] border-2 border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm">
+              <p className="font-semibold text-[var(--destructive)]">Could not start run</p>
+              <p className="mt-1 text-[var(--muted-foreground)]">{createRunError}</p>
+              <p className="mt-2 text-[var(--muted-foreground)]">Fix the issue and try again, or start a new run.</p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>

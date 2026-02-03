@@ -9,6 +9,7 @@ public sealed class TraceWriter : IDisposable
 {
     private readonly StreamWriter _writer;
     private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = false };
+    private readonly object _lock = new();
 
     public TraceWriter(string runPath)
     {
@@ -26,8 +27,12 @@ public sealed class TraceWriter : IDisposable
             evt.AgentName,
             evt.Message,
             evt.DurationMs);
-        _writer.WriteLine(JsonSerializer.Serialize(line, _jsonOptions));
-        _writer.Flush();
+        var json = JsonSerializer.Serialize(line, _jsonOptions);
+        lock (_lock)
+        {
+            _writer.WriteLine(json);
+            _writer.Flush();
+        }
     }
 
     public void Dispose() => _writer.Dispose();
