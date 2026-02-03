@@ -42,7 +42,8 @@ public static class ShowCommand
             if (json)
             {
                 var state = design_agent.Services.RunPersistence.LoadState(runPath);
-                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = (string?)null };
+                var includedSections = design_agent.Services.RunPersistence.LoadNormalizedIncludedSections(runPath);
+                var envelope = new { runId, status = state.Status, runPath, includedSections, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = (string?)null };
                 Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             }
             else
@@ -55,7 +56,8 @@ public static class ShowCommand
         var markdown = design_agent.Services.RunPersistence.LoadDesignMarkdown(runPath);
         if (json)
         {
-            var envelope = new { runId, status = "Completed", runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = markdown };
+            var includedSections = design_agent.Services.RunPersistence.LoadNormalizedIncludedSections(runPath);
+            var envelope = new { runId, status = "Completed", runPath, includedSections, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = markdown };
             Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
         }
         else

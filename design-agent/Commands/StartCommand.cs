@@ -60,7 +60,8 @@ public static class StartCommand
 
             if (json)
             {
-                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = blocking.Select(q => new { q.Id, q.Text, q.Blocking }), nonBlockingQuestions = nonBlocking.Select(q => new { q.Id, q.Text, q.Blocking }), designDocMarkdown = (string?)null };
+                var includedSections = design_agent.Services.SectionSelection.Normalize(null);
+                var envelope = new { runId, status = state.Status, runPath, includedSections, blockingQuestions = blocking.Select(q => new { q.Id, q.Text, q.Blocking }), nonBlockingQuestions = nonBlocking.Select(q => new { q.Id, q.Text, q.Blocking }), designDocMarkdown = (string?)null };
                 Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
                 return;
             }
@@ -90,7 +91,8 @@ public static class StartCommand
             var nonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
             if (json)
             {
-                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = blocking, nonBlockingQuestions = nonBlocking, designDocMarkdown = (string?)null };
+                var includedSections = design_agent.Services.RunPersistence.LoadNormalizedIncludedSections(runPath);
+                var envelope = new { runId, status = state.Status, runPath, includedSections, blockingQuestions = blocking, nonBlockingQuestions = nonBlocking, designDocMarkdown = (string?)null };
                 Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             }
             else
@@ -110,7 +112,7 @@ public static class StartCommand
 
         if (json)
         {
-            var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = completed.Published.DesignDocMarkdown };
+            var envelope = new { runId, status = state.Status, runPath, includedSections = completed.IncludedSections, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = completed.Published.DesignDocMarkdown };
             Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             return;
         }

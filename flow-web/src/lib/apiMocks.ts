@@ -3,6 +3,7 @@ import type {
   RunEnvelope,
   RunMetadata,
 } from "@/types"
+import { DEFAULT_MINIMAL_SECTIONS } from "@/lib/sections"
 
 export const MOCK_RUN_ID = "mock-run-test"
 
@@ -25,6 +26,7 @@ export function mockRunEnvelope(runId: string = MOCK_RUN_ID): RunEnvelope {
     runId,
     status: "Running", // Start as Running so DAG visualization is shown
     runPath: "/mock/path",
+    includedSections: [...DEFAULT_MINIMAL_SECTIONS],
     blockingQuestions: [],
     nonBlockingQuestions: [],
     designDocMarkdown: MOCK_DESIGN_MARKDOWN,
@@ -53,6 +55,7 @@ export function mockRunMetadata(runId: string = MOCK_RUN_ID): RunMetadata {
     updatedAt: now,
     hasDesignDoc: isCompleted,
     artifactPaths: MOCK_ARTIFACT_PATHS,
+    includedSections: [...DEFAULT_MINIMAL_SECTIONS],
     blockingQuestions: null,
     nonBlockingQuestions: null,
   }

@@ -28,6 +28,25 @@ public static class RunPersistence
     public static RunInput LoadInput(string runPath) =>
         AgentCore.RunPersistence.LoadInput<RunInput>(runPath);
 
+    /// <summary>
+    /// Returns normalized included sections for a run: from PublishedPackage if available, else from RunInput.
+    /// </summary>
+    public static IReadOnlyList<string> LoadNormalizedIncludedSections(string runPath)
+    {
+        var published = LoadPublishedPackage(runPath);
+        if (published?.IncludedSections is { Count: > 0 } list)
+            return list;
+        try
+        {
+            var input = LoadInput(runPath);
+            return SectionSelection.Normalize(input.IncludedSections);
+        }
+        catch
+        {
+            return SectionSelection.DefaultMinimalSections;
+        }
+    }
+
     public static void SaveClarifier(string runPath, ClarifierOutput output) =>
         AgentCore.RunPersistence.SaveArtifactJson(runPath, "clarifier.json", output);
 

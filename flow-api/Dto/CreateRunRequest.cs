@@ -7,7 +7,8 @@ public record CreateRunRequest(
     [property: JsonPropertyName("prompt")] string Prompt,
     [property: JsonPropertyName("context")] CreateRunContext? Context,
     [property: JsonPropertyName("synthSpecialists")] [property: JsonConverter(typeof(SynthSpecialistsConverter))] List<string>? SynthSpecialists = null,
-    [property: JsonPropertyName("allowAssumptions")] bool AllowAssumptions = false);
+    [property: JsonPropertyName("allowAssumptions")] bool AllowAssumptions = false,
+    [property: JsonPropertyName("includedSections")] List<string>? IncludedSections = null);
 
 public record CreateRunContext(
     [property: JsonPropertyName("links")] List<string>? Links,

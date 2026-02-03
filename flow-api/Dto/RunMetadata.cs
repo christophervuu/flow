@@ -9,6 +9,7 @@ public record RunMetadata(
     [property: JsonPropertyName("updatedAt")] string UpdatedAt,
     [property: JsonPropertyName("hasDesignDoc")] bool HasDesignDoc,
     [property: JsonPropertyName("artifactPaths")] ArtifactPathsDto ArtifactPaths,
+    [property: JsonPropertyName("includedSections")] IReadOnlyList<string>? IncludedSections = null,
     [property: JsonPropertyName("blockingQuestions")] List<QuestionDto>? BlockingQuestions = null,
     [property: JsonPropertyName("nonBlockingQuestions")] List<QuestionDto>? NonBlockingQuestions = null,
     [property: JsonPropertyName("remainingOpenQuestionsCount")] int? RemainingOpenQuestionsCount = null,

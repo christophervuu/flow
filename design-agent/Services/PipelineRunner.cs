@@ -124,14 +124,25 @@ public static class PipelineRunner
         RunPersistence.SaveOptimizedDesign(runPath, optimized);
         var optimizedJson = JsonSerializer.Serialize(optimized, new JsonSerializerOptions { WriteIndented = false });
 
+        List<string>? rawSections = null;
+        try
+        {
+            var input = RunPersistence.LoadInput(runPath);
+            rawSections = input.IncludedSections;
+        }
+        catch { /* backward compat: missing or malformed input.json -> null -> default minimal */ }
+        var includedSections = SectionSelection.Normalize(rawSections);
+        var includedSectionsJson = JsonSerializer.Serialize(includedSections, new JsonSerializerOptions { WriteIndented = false });
+        var headingMapping = SectionSelection.BuildHeadingMappingText(includedSections);
+
         var publishAgent = AgentFactory.CreatePublisherAgent(chatClient, runTools);
         var synthQuestions = RunPersistence.LoadSynthQuestions(runPath);
         var synthAssumptions = RunPersistence.LoadSynthAssumptions(runPath);
         var openQuestionsBlock = synthQuestions is { Count: > 0 }
-            ? "\n\nRemaining open questions (include in section 14 Open Questions and in remaining_open_questions):\n" + JsonSerializer.Serialize(synthQuestions, new JsonSerializerOptions { WriteIndented = false })
+            ? "\n\nRemaining open questions (include in Open Questions section and in remaining_open_questions):\n" + JsonSerializer.Serialize(synthQuestions, new JsonSerializerOptions { WriteIndented = false })
             : "";
         var assumptionsBlock = synthAssumptions is { Count: > 0 }
-            ? "\n\nAssumptions made when proceeding without answers (include in section 14 or Assumptions):\n" + JsonSerializer.Serialize(synthAssumptions, new JsonSerializerOptions { WriteIndented = false })
+            ? "\n\nAssumptions made when proceeding without answers (include in Open Questions or Assumptions):\n" + JsonSerializer.Serialize(synthAssumptions, new JsonSerializerOptions { WriteIndented = false })
             : "";
         var published = await JsonStageRunner.RunJsonStageWithRetryAsync(
             publishAgent,
@@ -143,14 +154,25 @@ public static class PipelineRunner
             {openQuestionsBlock}
             {assumptionsBlock}
 
-            Produce your PublishedPackage JSON with a complete design_doc_markdown following the 15-section template. Ensure section 14 (Open Questions) and remaining_open_questions include any open questions and assumptions listed above.
+            included_sections: {includedSectionsJson}
+            For each section ID, use this exact heading:
+            {headingMapping}
+            Output ONLY these sections in this order. If work_breakdown is not in included_sections, output issues: [] and pr_plan: []. Ensure remaining_open_questions includes any open questions and assumptions listed above.
+
+            Produce your PublishedPackage JSON.
             """,
             runPath, "Publisher", "Publisher",
             s => JsonHelper.TryDeserialize<PublishedPackage>(s), OnEvent);
 
+        if (!includedSections.Contains("work_breakdown", StringComparer.OrdinalIgnoreCase))
+        {
+            published = published with { Issues = [], PrPlan = [] };
+        }
+        published = published with { IncludedSections = includedSections.ToList() };
+
         RunPersistence.SavePublishedPackage(runPath, published);
 
-        return new PipelineCompleted(proposed, critique, optimized, published);
+        return new PipelineCompleted(proposed, critique, optimized, published, includedSections);
     }
 
     /// <summary>

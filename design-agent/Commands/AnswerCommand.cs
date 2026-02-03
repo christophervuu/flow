@@ -86,7 +86,8 @@ public static class AnswerCommand
             var awaitingNonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
             if (json)
             {
-                var envelope = new { runId, status = state.Status, runPath, blockingQuestions = awaitingBlocking, nonBlockingQuestions = awaitingNonBlocking, designDocMarkdown = (string?)null };
+                var includedSections = design_agent.Services.RunPersistence.LoadNormalizedIncludedSections(runPath);
+                var envelope = new { runId, status = state.Status, runPath, includedSections, blockingQuestions = awaitingBlocking, nonBlockingQuestions = awaitingNonBlocking, designDocMarkdown = (string?)null };
                 Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             }
             else
@@ -106,7 +107,7 @@ public static class AnswerCommand
 
         if (json)
         {
-            var envelope = new { runId, status = state.Status, runPath, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = completed.Published.DesignDocMarkdown };
+            var envelope = new { runId, status = state.Status, runPath, includedSections = completed.IncludedSections, blockingQuestions = Array.Empty<object>(), nonBlockingQuestions = Array.Empty<object>(), designDocMarkdown = completed.Published.DesignDocMarkdown };
             Console.WriteLine(JsonSerializer.Serialize(envelope, JsonOptions));
             return;
         }

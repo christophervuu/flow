@@ -37,11 +37,11 @@ static string BuildPromptFromContext(string prompt, CreateRunContext? context)
     return string.Join("\n\n", parts);
 }
 
-static RunEnvelope ToEnvelope(string runId, string runPath, RunState state, List<Question> blockingQuestions, List<Question> nonBlockingQuestions, string? designDocMarkdown)
+static RunEnvelope ToEnvelope(string runId, string runPath, RunState state, IReadOnlyList<string> includedSections, List<Question> blockingQuestions, List<Question> nonBlockingQuestions, string? designDocMarkdown)
 {
     var blocking = blockingQuestions.Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
     var nonBlocking = nonBlockingQuestions.Select(q => new QuestionDto(q.Id, q.Text, q.Blocking)).ToList();
-    return new RunEnvelope(runId, state.Status, runPath, blocking, nonBlocking, designDocMarkdown);
+    return new RunEnvelope(runId, state.Status, runPath, includedSections, blocking, nonBlocking, designDocMarkdown);
 }
 
 static (List<Question> Blocking, List<Question> NonBlocking) GetQuestionsFromClarifier(ClarifierOutput? clarifier)
@@ -158,6 +158,16 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
     if (string.IsNullOrWhiteSpace(req?.Title) || string.IsNullOrWhiteSpace(req?.Prompt))
         return Results.Problem("title and prompt are required", statusCode: 400);
 
+    IReadOnlyList<string> normalizedSections;
+    try
+    {
+        normalizedSections = SectionSelection.Normalize(req.IncludedSections);
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: 400);
+    }
+
     var runDir = GetRunDir();
     var runId = Guid.NewGuid().ToString();
     var runPath = RunPersistence.GetRunDir(runDir, runId);
@@ -167,7 +177,7 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
     var now = DateTime.UtcNow.ToString("O");
     var state = new RunState(runId, "Running", now, now);
     RunPersistence.SaveState(runPath, state);
-    RunPersistence.SaveInput(runPath, new RunInput(req.Title, prompt));
+    RunPersistence.SaveInput(runPath, new RunInput(req.Title, prompt, normalizedSections.ToList()));
 
     ClarifierResult result;
     try
@@ -190,7 +200,7 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
         state = state with { Status = "AwaitingClarifications", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
         var (blocking, nonBlocking) = GetQuestionsFromClarifier(result.Output);
-        return Results.Json(ToEnvelope(runId, runPath, state, blocking, nonBlocking, null));
+        return Results.Json(ToEnvelope(runId, runPath, state, normalizedSections, blocking, nonBlocking, null));
     }
 
     if (result.HasBlockingQuestions && req.AllowAssumptions)
@@ -225,13 +235,14 @@ app.MapPost("/api/design/runs", async (HttpContext ctx, [FromBody] CreateRunRequ
             RunPersistence.SaveState(runPath, state);
             var blocking = awaiting.Questions.Where(q => q.Blocking).ToList();
             var nonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
-            return Results.Json(ToEnvelope(runId, runPath, state, blocking, nonBlocking, null));
+            var includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
+            return Results.Json(ToEnvelope(runId, runPath, state, includedSections, blocking, nonBlocking, null));
         }
         var completed = (PipelineCompleted)pipelineResult;
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
         var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(result.Output);
-        return Results.Json(ToEnvelope(runId, runPath, state, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
+        return Results.Json(ToEnvelope(runId, runPath, state, completed.IncludedSections, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
     }
     catch (InvalidOperationException ex)
     {
@@ -297,13 +308,14 @@ app.MapPost("/api/design/runs/{runId}/answers", async (string runId, [FromBody] 
             RunPersistence.SaveState(runPath, state);
             var awaitingBlocking = awaiting.Questions.Where(q => q.Blocking).ToList();
             var awaitingNonBlocking = awaiting.Questions.Where(q => !q.Blocking).ToList();
-            return Results.Json(ToEnvelope(runId, runPath, state, awaitingBlocking, awaitingNonBlocking, null));
+            var includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
+            return Results.Json(ToEnvelope(runId, runPath, state, includedSections, awaitingBlocking, awaitingNonBlocking, null));
         }
         var completed = (PipelineCompleted)pipelineResult;
         state = state with { Status = "Completed", UpdatedAt = DateTime.UtcNow.ToString("O") };
         RunPersistence.SaveState(runPath, state);
         var (blockingQ, nonBlockingQ) = GetQuestionsFromClarifier(clarifierOutput);
-        return Results.Json(ToEnvelope(runId, runPath, state, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
+        return Results.Json(ToEnvelope(runId, runPath, state, completed.IncludedSections, blockingQ, nonBlockingQ, completed.Published.DesignDocMarkdown));
     }
     catch (InvalidOperationException ex)
     {
@@ -393,7 +405,14 @@ app.MapGet("/api/design/runs/{runId}", (string runId) =>
         catch { /* optional */ }
     }
 
-    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, blockingQuestions, nonBlockingQuestions, remainingOpenQuestionsCount, assumptionsCount, executionStatus);
+    IReadOnlyList<string>? includedSections = null;
+    try
+    {
+        includedSections = RunPersistence.LoadNormalizedIncludedSections(runPath);
+    }
+    catch { /* optional */ }
+
+    var meta = new RunMetadata(state.RunId, state.Status, state.CreatedAt, state.UpdatedAt, hasDesignDoc, artifactPaths, includedSections, blockingQuestions, nonBlockingQuestions, remainingOpenQuestionsCount, assumptionsCount, executionStatus);
     return Results.Json(meta);
 });
 

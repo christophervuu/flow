@@ -21,6 +21,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-mono);
 }
 
 @layer base {
@@ -44,6 +46,9 @@
     --border: oklch(92% 0.004 286.32);
     --input: oklch(92% 0.004 286.32);
     --ring: oklch(9% 0.006 285.885);
+    --font-body: ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, monospace;
+    --font-display: ui-sans-serif, system-ui, sans-serif;
   }
 }
 
@@ -52,6 +57,7 @@
     @apply border-border;
   }
   body {
+    font-family: var(--font-body, ui-sans-serif, system-ui, sans-serif);
     @apply bg-background text-foreground antialiased;
   }
 }
@@ -152,22 +158,39 @@ button:not(:disabled),
   background: #c4b5f0;
 }
 
-/* Retro theme: card/panel outlines need solid border-style to render */
+/* Retro theme: card/panel outlines – explicit black outline so it always shows */
 [data-theme="retro"] .retro-card-outline {
-  border-style: solid;
+  border-style: solid !important;
+  border-width: 2px !important;
+  border-color: #0a0a0a !important;
 }
 
-/* Retro theme: black outlines on all form components */
-[data-theme="retro"] input,
-[data-theme="retro"] textarea,
+/* Retro theme: black outlines on form components */
 [data-theme="retro"] select {
   border-width: var(--border-width) !important;
   border-color: var(--border) !important;
 }
 
-/* Exclude accordion triggers and inline text buttons from thick border */
+[data-theme="retro"] input,
+[data-theme="retro"] textarea {
+  border-width: 2px !important;
+  border-style: solid !important;
+  border-color: #0a0a0a !important;
+  transition: background-color var(--transition-fast);
+}
+
+[data-theme="retro"] input:focus,
+[data-theme="retro"] input:focus-visible,
+[data-theme="retro"] textarea:focus,
+[data-theme="retro"] textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+/* Buttons and Optional Configuration: same 2px black outline as textboxes */
 [data-theme="retro"] button:not([data-radix-collection-item]):not(.no-retro-border) {
-  border-width: var(--border-width) !important;
+  border-width: 2px !important;
   border-style: solid !important;
   border-color: var(--border) !important;
 }
@@ -187,4 +210,8 @@ button:not(:disabled),
   --tw-prose-bold: var(--foreground);
   --tw-prose-counters: var(--foreground);
   --tw-prose-bullets: var(--foreground);
+}
+
+[data-theme="retro"] .prose code {
+  font-family: var(--font-mono);
 }

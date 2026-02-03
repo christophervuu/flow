@@ -8,6 +8,7 @@ export interface RunEnvelope {
   runId: string
   status: string
   runPath: string
+  includedSections?: string[]
   blockingQuestions: QuestionDto[]
   nonBlockingQuestions: QuestionDto[]
   designDocMarkdown: string | null
@@ -54,6 +55,7 @@ export interface RunMetadata {
   updatedAt: string
   hasDesignDoc: boolean
   artifactPaths: ArtifactPathsDto
+  includedSections?: string[] | null
   blockingQuestions?: QuestionDto[] | null
   nonBlockingQuestions?: QuestionDto[] | null
   remainingOpenQuestionsCount?: number | null
@@ -68,7 +70,9 @@ export interface CreateRunRequest {
     links?: string[]
     notes?: string
   }
+  /** @deprecated Use includedSections instead. Kept for API compatibility. */
   synthSpecialists?: string[] | null
+  includedSections?: string[] | null
   allowAssumptions?: boolean
 }
 

@@ -9,6 +9,7 @@ public record PipelineCompleted(
     ProposedDesign Design,
     Critique Critique,
     OptimizedDesign Optimized,
-    PublishedPackage Published) : RunRemainingPipelineResult;
+    PublishedPackage Published,
+    IReadOnlyList<string> IncludedSections) : RunRemainingPipelineResult;
 
 public record PipelineAwaitingSynthQuestions(List<Question> Questions) : RunRemainingPipelineResult;
