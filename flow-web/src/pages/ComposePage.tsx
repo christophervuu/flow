@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { FormEvent } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { createRun, getRun, getDesign, submitAnswers } from "@/lib/api"
-import { buildPrompt, type StructuredContext } from "@/lib/promptBuilder"
+import { buildPrompt, appendAttachmentsToPrompt, type StructuredContext } from "@/lib/promptBuilder"
 import { addRecentRun } from "@/lib/storage"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useRun } from "@/contexts/RunContext"
@@ -45,6 +45,12 @@ export function ComposePage() {
   const [submittedTitle, setSubmittedTitle] = useState("")
   const [createRunError, setCreateRunError] = useState<string | null>(null)
   const [submitAnswersError, setSubmitAnswersError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<
+    Array<{ id: string; name: string; content: string }>
+  >([])
+  const [pendingPaste, setPendingPaste] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Non-blocking run creation mutation
   const createRunMutation = useMutation({
@@ -130,7 +136,8 @@ export function ComposePage() {
       return
     }
 
-    const finalPrompt = buildPrompt(prompt, context)
+    const basePrompt = buildPrompt(prompt, context)
+    const finalPrompt = appendAttachmentsToPrompt(basePrompt, attachments.map((a) => ({ name: a.name, content: a.content })))
     const linksText = context.links?.trim() ?? ""
     const links = linksText
       ? linksText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
@@ -159,6 +166,82 @@ export function ComposePage() {
     setInitialDesignMarkdown(null)
     setCreateRunError(null)
     setSubmitAnswersError(null)
+  }
+
+  function addAttachment(name: string, content: string) {
+    setAttachments((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), name, content },
+    ])
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files?.length) return
+    for (const file of Array.from(files)) {
+      try {
+        const text = await file.text()
+        const name = file.name || `attachment-${Date.now()}.txt`
+        addAttachment(name, text)
+      } catch {
+        toast.error(`Could not read ${file.name}`)
+      }
+    }
+    e.target.value = ""
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const files = e.dataTransfer.files
+    if (!files?.length) return
+    for (const file of Array.from(files)) {
+      file.text().then(
+        (text) => addAttachment(file.name || `attachment-${Date.now()}.txt`, text),
+        () => toast.error(`Could not read ${file.name}`)
+      )
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "copy"
+  }
+
+  function handlePromptPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const text = e.clipboardData.getData("text/plain")
+    if (!text?.trim()) return
+    e.preventDefault()
+    setPendingPaste(text)
+  }
+
+  function applyPasteAsAttachment() {
+    if (!pendingPaste) return
+    const name =
+      attachments.some((a) => a.name === "pasted.md")
+        ? `pasted-${Date.now()}.md`
+        : "pasted.md"
+    addAttachment(name, pendingPaste)
+    setPendingPaste(null)
+  }
+
+  function applyPasteIntoPrompt() {
+    if (!pendingPaste || !promptTextareaRef.current) return
+    const ta = promptTextareaRef.current
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const before = prompt.slice(0, start)
+    const after = prompt.slice(end)
+    setPrompt(before + pendingPaste + after)
+    setPendingPaste(null)
+    requestAnimationFrame(() => {
+      const newPos = start + pendingPaste.length
+      ta.setSelectionRange(newPos, newPos)
+      ta.focus()
+    })
   }
 
   function handleClarificationsSubmit(e: FormEvent) {
@@ -286,178 +369,298 @@ export function ComposePage() {
 
   if (!runId) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <div
-          className={cn(
-            "relative p-8 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline",
-            "shadow-[var(--shadow-card)]"
-          )}
-        >
-          {theme === "retro" && (
-            <>
-              <span className="card-doodle-star absolute -top-3 right-10 text-3xl">
-                ✨
-              </span>
-              <span className="card-doodle-sparkle absolute -bottom-2 left-8 text-2xl">
-                ⭐
-              </span>
-            </>
-          )}
-
-          <div className="flex items-center gap-3 mb-7">
+      <div
+        className={cn(
+          "grid gap-6 min-h-[calc(100vh-12rem)]",
+          "grid-cols-1 lg:grid-cols-[320px_1fr]"
+        )}
+      >
+        {/* Left column: Include Sections */}
+        <div className="flex flex-col min-h-0">
+          <div
+            className={cn(
+              "relative flex flex-col flex-1 min-h-0 p-6 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline",
+              "shadow-[var(--shadow-card)]"
+            )}
+          >
             {theme === "retro" && (
-              <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-green)] text-xl"
-                aria-hidden
+              <>
+                <span className="card-doodle-star absolute -top-3 right-10 text-3xl">
+                  ✨
+                </span>
+                <span className="card-doodle-sparkle absolute -bottom-2 left-8 text-2xl">
+                  ⭐
+                </span>
+              </>
+            )}
+            <h2 className="text-xl font-semibold mb-1">Include sections</h2>
+            <p className="text-xs text-muted-foreground mb-4">
+              Choose which sections to include in the final design doc. Excluded
+              sections are omitted entirely.
+            </p>
+            <div className="flex gap-2 mb-4">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIncludedSections([...DEFAULT_MINIMAL_SECTIONS])}
+                disabled={createRunMutation.isPending}
+                className={cn(
+                  theme === "retro" &&
+                    "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+                )}
               >
-                🎨
+                Select default
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIncludedSections([...ALL_SECTION_IDS])}
+                disabled={createRunMutation.isPending}
+                className={cn(
+                  theme === "retro" &&
+                    "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+                )}
+              >
+                Select all
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 overflow-auto min-h-0">
+              {SECTION_OPTIONS.map(({ id, label }) => (
+                <label
+                  key={id}
+                  className="flex items-center gap-2 cursor-pointer text-sm"
+                >
+                  <Checkbox
+                    checked={includedSections.includes(id)}
+                    onCheckedChange={(checked) => {
+                      setIncludedSections((prev) =>
+                        checked ? [...prev, id] : prev.filter((k) => k !== id)
+                      )
+                    }}
+                    disabled={createRunMutation.isPending}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right column: New Design form */}
+        <div className="flex flex-col min-h-0">
+          <div
+            className={cn(
+              "relative flex flex-col flex-1 min-h-0 p-8 rounded-[var(--border-radius-card)] border-[var(--border-width)] border-[var(--border)] bg-[var(--card)] retro-card-outline",
+              "shadow-[var(--shadow-card)]"
+            )}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              {theme === "retro" && (
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[var(--border)] bg-[var(--accent-green)] text-xl"
+                  aria-hidden
+                >
+                  🎨
+                </div>
+              )}
+              <h1 className="text-2xl font-semibold">New Design</h1>
+            </div>
+
+            {createRunError && (
+              <div className="mb-6 rounded-[var(--border-radius-card)] border-2 border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm">
+                <p className="font-semibold text-[var(--destructive)]">Could not start run</p>
+                <p className="mt-1 text-[var(--muted-foreground)]">{createRunError}</p>
+                <p className="mt-2 text-[var(--muted-foreground)]">Fix the issue and try again, or start a new run.</p>
               </div>
             )}
-            <h1 className="text-2xl font-semibold">New Design</h1>
-          </div>
 
-          {createRunError && (
-            <div className="mb-6 rounded-[var(--border-radius-card)] border-2 border-[var(--destructive)] bg-[var(--destructive)]/10 p-4 text-sm">
-              <p className="font-semibold text-[var(--destructive)]">Could not start run</p>
-              <p className="mt-1 text-[var(--muted-foreground)]">{createRunError}</p>
-              <p className="mt-2 text-[var(--muted-foreground)]">Fix the issue and try again, or start a new run.</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <Label htmlFor="title" className="flex items-center gap-2 font-bold">
-                Title
-                {theme === "retro" && (
-                  <span className="rounded-full border-2 border-[var(--border)] bg-[var(--accent-peach)] px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
-                    Required
-                  </span>
-                )}
-              </Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder={
-                  theme === "retro" ? "Give your design a name..." : "Design title"
-                }
-                required
-                disabled={createRunMutation.isPending}
-                className="mt-1 bg-[var(--background)]"
-              />
-            </div>
-            <div>
-              <Label htmlFor="prompt" className="flex items-center gap-2 font-bold">
-                Prompt
-                {theme === "retro" && (
-                  <span className="rounded-full border-2 border-[var(--border)] bg-[var(--accent-peach)] px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
-                    Required
-                  </span>
-                )}
-              </Label>
-              <Textarea
-                id="prompt"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe what you want to design..."
-                required
-                disabled={createRunMutation.isPending}
-                rows={5}
-                className="mt-1 bg-[var(--background)]"
-              />
-            </div>
-
-            <div>
-              <ContextAccordion
-                context={context}
-                onChange={setContext}
-                disabled={createRunMutation.isPending}
-              />
-            </div>
-
-            <div className="space-y-3">
-              <Label className="text-sm font-medium">Include sections</Label>
-              <p className="text-xs text-muted-foreground">
-                Choose which sections to include in the final design doc. Excluded
-                sections are omitted entirely.
-              </p>
-              <div className="flex gap-2 mb-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIncludedSections([...DEFAULT_MINIMAL_SECTIONS])}
-                  disabled={createRunMutation.isPending}
-                  className={cn(
-                    theme === "retro" &&
-                      "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+            <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 space-y-6">
+              <div>
+                <Label htmlFor="title" className="flex items-center gap-2 font-bold">
+                  Title
+                  {theme === "retro" && (
+                    <span className="rounded-full border-2 border-[var(--border)] bg-[var(--accent-peach)] px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
+                      Required
+                    </span>
                   )}
-                >
-                  Select default
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIncludedSections([...ALL_SECTION_IDS])}
+                </Label>
+                <Input
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={
+                    theme === "retro" ? "Give your design a name..." : "Design title"
+                  }
+                  required
                   disabled={createRunMutation.isPending}
-                  className={cn(
-                    theme === "retro" &&
-                      "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
-                  )}
-                >
-                  Select all
-                </Button>
+                  className="mt-1 bg-[var(--background)]"
+                />
               </div>
-              <div className="flex flex-wrap gap-x-4 gap-y-2">
-                {SECTION_OPTIONS.map(({ id, label }) => (
-                  <label
-                    key={id}
-                    className="flex items-center gap-2 cursor-pointer text-sm"
+              <div>
+                <Label htmlFor="prompt" className="flex items-center gap-2 font-bold">
+                  Prompt
+                  {theme === "retro" && (
+                    <span className="rounded-full border-2 border-[var(--border)] bg-[var(--accent-peach)] px-2 py-0.5 text-xs font-bold uppercase tracking-wide">
+                      Required
+                    </span>
+                  )}
+                </Label>
+                <Textarea
+                  ref={promptTextareaRef}
+                  id="prompt"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onPaste={handlePromptPaste}
+                  placeholder="Describe what you want to design..."
+                  required
+                  disabled={createRunMutation.isPending}
+                  rows={5}
+                  className="mt-1 bg-[var(--background)]"
+                />
+                {pendingPaste !== null && (
+                  <div
+                    className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--border-radius-input)] border-2 border-[var(--border)] bg-[var(--muted)]/50 p-3 text-sm"
+                    role="alert"
                   >
-                    <Checkbox
-                      checked={includedSections.includes(id)}
-                      onCheckedChange={(checked) => {
-                        setIncludedSections((prev) =>
-                          checked ? [...prev, id] : prev.filter((k) => k !== id)
-                        )
-                      }}
-                      disabled={createRunMutation.isPending}
+                    <span className="text-muted-foreground">
+                      Pasted content detected.
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={applyPasteAsAttachment}
+                      className={cn(
+                        theme === "retro" &&
+                          "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+                      )}
+                    >
+                      Add as markdown attachment
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={applyPasteIntoPrompt}
+                      className={cn(
+                        theme === "retro" &&
+                          "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+                      )}
+                    >
+                      Keep in prompt
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setPendingPaste(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+                <div className="mt-3 space-y-2">
+                  <Label className="text-sm font-medium">Attachments</Label>
+                  {attachments.length > 0 && (
+                    <ul className="flex flex-wrap gap-2">
+                      {attachments.map((a) => (
+                        <li
+                          key={a.id}
+                          className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--muted)]/50 px-2 py-1 text-sm"
+                        >
+                          <span className="truncate max-w-[180px]" title={a.name}>
+                            {a.name}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeAttachment(a.id)}
+                            disabled={createRunMutation.isPending}
+                            aria-label={`Remove ${a.name}`}
+                          >
+                            ×
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div
+                    className={cn(
+                      "flex items-center gap-2 rounded-[var(--border-radius-input)] border-2 border-dashed border-[var(--border)] bg-[var(--muted)]/30 p-3 min-h-[52px]",
+                      "hover:border-[var(--ring)] hover:bg-[var(--muted)]/50 transition-colors"
+                    )}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.json,.yml,.yaml,.csv"
+                      className="hidden"
+                      onChange={handleFileSelect}
                     />
-                    {label}
-                  </label>
-                ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={createRunMutation.isPending}
+                      className={cn(
+                        theme === "retro" &&
+                          "border-2 border-[var(--border)] rounded-[var(--border-radius-button)]"
+                      )}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Add file
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      or drag and drop text files here
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="allow-assumptions"
-                checked={allowAssumptions}
-                onCheckedChange={(checked) =>
-                  setAllowAssumptions(checked === true)
-                }
+              <div>
+                <ContextAccordion
+                  context={context}
+                  onChange={setContext}
+                  disabled={createRunMutation.isPending}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="allow-assumptions"
+                  checked={allowAssumptions}
+                  onCheckedChange={(checked) =>
+                    setAllowAssumptions(checked === true)
+                  }
+                  disabled={createRunMutation.isPending}
+                />
+                <Label
+                  htmlFor="allow-assumptions"
+                  className="text-sm font-medium cursor-pointer"
+                >
+                  Allow assumptions for unanswered questions
+                </Label>
+              </div>
+
+              <Button
+                type="submit"
                 disabled={createRunMutation.isPending}
-              />
-              <Label
-                htmlFor="allow-assumptions"
-                className="text-sm font-medium cursor-pointer"
+                className={cn(
+                  theme === "retro" &&
+                    "bg-[var(--accent-yellow)] text-[var(--foreground)] hover:bg-[#ffef9f] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[var(--shadow-button-hover)]"
+                )}
               >
-                Allow assumptions for unanswered questions
-              </Label>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={createRunMutation.isPending}
-              className={cn(
-                theme === "retro" &&
-                  "bg-[var(--accent-yellow)] text-[var(--foreground)] hover:bg-[#ffef9f] hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[var(--shadow-button-hover)]"
-              )}
-            >
-              {theme === "retro" ? "▶ Start run" : "Start run"}
-            </Button>
-          </form>
+                {theme === "retro" ? "▶ Start run" : "Start run"}
+              </Button>
+            </form>
+          </div>
         </div>
       </div>
     )

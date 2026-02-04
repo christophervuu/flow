@@ -109,3 +109,20 @@ export function buildPrompt(userPrompt: string, context: StructuredContext): str
 
   return parts.join("\n\n")
 }
+
+export interface PromptAttachment {
+  name: string
+  content: string
+}
+
+/** Appends attachment blocks to a prompt string. */
+export function appendAttachmentsToPrompt(
+  promptText: string,
+  attachments: PromptAttachment[]
+): string {
+  if (!attachments.length) return promptText
+  const blocks = attachments.map(
+    (a) => `## Attachment: ${a.name}\n\n${a.content}`
+  )
+  return [promptText, "--- Attachments ---", ...blocks].join("\n\n")
+}

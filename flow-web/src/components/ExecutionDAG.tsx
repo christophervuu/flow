@@ -118,8 +118,13 @@ export function ExecutionDAG({ runId, status, executionStatus: executionStatusPr
     refetchInterval: shouldPoll ? 1000 : false,
   })
 
-  // Use prop when completed so parent can pass meta.executionStatus; otherwise use fetched execStatus
-  const resolvedStatus = isCompleted && executionStatusProp ? executionStatusProp : execStatus
+  // When completed: prefer last polled execStatus (if it has completed agents) to avoid snapping to full completion; use executionStatusProp when we don't have that (e.g. page load for already-completed run)
+  const resolvedStatus =
+    isCompleted && execStatus && (execStatus.completedAgents?.length ?? 0) > 0
+      ? execStatus
+      : isCompleted && executionStatusProp
+        ? executionStatusProp
+        : execStatus
 
   // For completed runs, use actual execution status when provided; else fallback to DEFAULT_AGENTS
   // For pending runs, show all agents as pending
@@ -141,7 +146,8 @@ export function ExecutionDAG({ runId, status, executionStatus: executionStatusPr
   )
   const nonEmptyColumns = stageColumns.filter((col) => col.length > 0)
 
-  const showExecutionStatusLoading = isRunning && !isPending && execStatusLoading
+  const showExecutionStatusLoading =
+    isRunning && !isPending && execStatusLoading && !execStatus
 
   const getStepStatus = (agentName: string) =>
     active.includes(agentName) ? "active" : completed.includes(agentName) ? "complete" : "pending"
